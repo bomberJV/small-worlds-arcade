@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#101710">
+  <meta name="description" content="Three original browser games: Ring Runner, The Green Room, and Sky Stack. Play with keyboard or touch.">
+  <title>Small Worlds Arcade — Brandon Frank Han-Chween Huang</title>
+  <link rel="stylesheet" href="../shared/play.css"><link rel="stylesheet" href="app.css"><script type="module" src="app.js"></script>
+<script type="module" data-narration="arcade" src="../shared/narration.js"></script><meta name="playground-narration" content="recorded"></head>
+<body>
+<a class="skip-arcade" href="#game-area">Skip to the games</a>
+<header><a class="brand" href="../index.html"><b>B.</b>BRANDON FRANK HAN-CHWEEN HUANG</a><a class="back" href="../index.html">← The playground</a></header>
+<main>
+  <div class="arcade-heading"><div><p class="kicker">02 / THREE SMALL WORLDS</p><h1>Okay,<br> <em>one more try.</em></h1></div><p class="intro">Fly through the rings. Find the exit.<br> See how high you can stack.<br> <span>Three little games. Pick one.</span></p></div>
+  <div class="cartridges" role="group" aria-label="Choose a game">
+    <button data-game="flight" aria-pressed="true"><span class="cartridge-art flight-icon" aria-hidden="true">◎</span><span><small>01 / FLY THROUGH THE RINGS</small><strong>Ring Runner</strong><em>Find the center.</em></span><b aria-hidden="true">↗</b></button>
+    <button data-game="maze" aria-pressed="false"><span class="cartridge-art maze-icon" aria-hidden="true">▥</span><span><small>02 / FIND THE EXIT</small><strong>The Green Room</strong><em>There is a way out.</em></span><b aria-hidden="true">↗</b></button>
+    <button data-game="stack" aria-pressed="false"><span class="cartridge-art stack-icon" aria-hidden="true">▰</span><span><small>03 / STACK THE BLOCKS</small><strong>Sky Stack</strong><em>Timing is everything.</em></span><b aria-hidden="true">↗</b></button>
+  </div>
+  <section id="game-area" class="game-shell" aria-label="Arcade cabinet">
+    <div class="cabinet-top"><span class="mono" id="cartridge-label">RING RUNNER / LOADED</span><div class="cabinet-options"><label for="difficulty">Pace</label><select id="difficulty"><option value="standard">One more try</option><option value="relaxed">Easygoing</option></select><button id="sound-toggle" aria-pressed="false">Sound off</button></div></div>
+    <div class="layout">
+      <div class="game-column">
+        <div class="stage" id="game-stage">
+          <canvas id="game" tabindex="0" aria-label="Ring Runner game view. Use arrow keys or WASD to steer. Press Escape to pause."></canvas>
+          <div class="hud" id="game-hud" aria-live="off"></div>
+          <div id="game-feedback" aria-hidden="true"></div>
+          <span class="stage-label" id="renderer-label">PERSPECTIVE 3D / RING RUNNER</span>
+          <div class="game-overlay" id="game-overlay"><span class="overlay-eyebrow" id="overlay-eyebrow">CARTRIDGE 01</span><h2 id="overlay-title">Can you hit the center?</h2><p id="overlay-copy">Fly through the rings. Aim for the center. Keep your streak alive.</p><span class="overlay-prompt" id="overlay-prompt">PRESS PLAY TO BEGIN</span></div>
+        </div>
+        <div class="play-controls"><button class="primary" id="start-game">Play</button><button id="pause-game" disabled>Pause</button><button id="new-maze" hidden>New maze ↻</button><button id="map-toggle" hidden aria-pressed="false">Reveal map</button><button id="action" hidden>Drop block ↓</button></div>
+        <div class="mobile-controls" id="touch-controls"><button data-key="ArrowLeft" aria-label="Move or turn left">←</button><button data-key="ArrowUp" aria-label="Move up or forward">↑</button><button data-key="ArrowDown" aria-label="Move down or backward">↓</button><button data-key="ArrowRight" aria-label="Move or turn right">→</button></div>
+        <p class="input-hint" id="input-hint">ARROWS / WASD TO STEER · DRAG THE VIEW ON TOUCH</p>
+      </div>
+      <aside class="side">
+        <p class="mono">THE OBJECTIVE</p><h2 id="game-title">Ring Runner</h2><p id="game-description"></p>
+        <dl class="run-stats"><div><dt id="stat-one-label">Rings</dt><dd id="stat-one">0 / 18</dd></div><div><dt id="stat-two-label">Combo</dt><dd id="stat-two">0</dd></div><div><dt id="stat-three-label">Score</dt><dd id="stat-three">0</dd></div></dl>
+        <p id="game-controls"></p><p class="status" id="game-status" role="status">Ready when you are.</p>
+        <div class="best-card"><span class="mono" id="best-label">PERSONAL BEST / THIS PACE</span><div id="best">—</div><span class="note" id="best-note">Saved only in this browser.</span></div>
+        <details><summary>How to play</summary><div id="game-rules"></div></details>
+      </aside>
+    </div>
+  </section>
+  <p class="arcade-footnote">I built these from geometry and a few rules. Your best scores stay in this browser. Scroll away or switch tabs and the game pauses.</p>
+</main>
+<footer><span>A BRANDON HUANG EXPERIMENT</span><a href="../README.md">Project documentation →</a><a href="../index.html">Back to curiosities ↗</a></footer>
+</body></html>

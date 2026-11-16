@@ -1,5 +1,8 @@
 # Small Worlds Arcade
 
+[Project priorities and agent handoff](https://github.com/bomberJV/brandon-studio/tree/priority-hub/priorities)
+
+
 Play Ring Runner, The Green Room and Sky Stack.
 
 From the repository root, run `python -m http.server 8000` and open [Small Worlds Arcade](http://localhost:8000/arcade/).

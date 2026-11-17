@@ -2,3 +2,6 @@
 html.game-expanded{overflow:hidden}.game-column.expanded{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;padding:12px 12px 6px;background:#0b100e;overflow:auto}.game-column.expanded .stage{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}.game-column.expanded .stage canvas{flex:1 1 auto;height:auto;min-height:0}.game-column.expanded .play-controls{margin:10px 0 4px}.game-column.expanded .input-hint{display:none}@media(min-width:851px){.side .status{min-height:67px}}
 .mobile-controls button.boost-key{width:auto;min-width:72px;padding:5px 12px;margin-left:8px;font:600 12px/1 ui-monospace,monospace;letter-spacing:.06em}
 .mobile-controls button.boost-key[hidden]{display:none}
+
+/* Sky Stack plays against a bright sky; a dark plate keeps the readout legible in every game. */
+#game-hud{background:rgba(9,15,12,.62);padding:3px 9px;border-radius:3px}

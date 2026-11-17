@@ -287,52 +287,93 @@ export function intervalOverlap(a, b, sizeA, sizeB) {
   const low = Math.max(a - sizeA / 2, b - sizeB / 2), high = Math.min(a + sizeA / 2, b + sizeB / 2);
   return { size: Math.max(0, high - low), center: (high + low) / 2 };
 }
+// ---- Sky Stack --------------------------------------------------------------------------
+// The climb has three stages. Morning is plain stacking. In Wind, gusts speed the slab up and slow
+// it down. In Sway, the whole tower leans back and forth, so you drop where the top will be.
+// Three perfect drops in a row mend the footprint a little.
+export const STAGES = [
+  { name: 'Morning', brief: 'Find your timing.' },
+  { name: 'Wind', brief: 'Gusts speed the slab up and slow it down.' },
+  { name: 'Sway', brief: 'The tower sways. Drop where the top will be.' },
+];
+export const STACK = { size: 4, height: .55, perfect: .1, grow: .25, growAfter: 3, range: 5, gust: { relaxed: .28, standard: .42 }, sway: { relaxed: .35, standard: .6 } };
+export const stackStage = s => Math.min(STAGES.length - 1, Math.floor(s.drops / (DIFFICULTIES[s.difficulty].stackGoal / STAGES.length)));
 export function createStack(difficulty = 'standard') {
-  return { ...base('stack', difficulty), blocks: [{ x: 0, z: 0, w: 4, d: 4 }], moving: { x: -5, z: 0, w: 4, d: 4 }, direction: 1, axis: 'x', perfect: 0, combo: 0, pieces: [], drops: 0, cooldown: 0 };
+  return { ...base('stack', difficulty), blocks: [{ x: 0, z: 0, w: STACK.size, d: STACK.size }], moving: { x: -STACK.range, z: 0, w: STACK.size, d: STACK.size }, direction: 1, axis: 'x',
+    perfect: 0, combo: 0, longestCombo: 0, marks: [], pieces: [], drops: 0, cooldown: 0, stage: 0, gust: 0, sway: 0, mended: 0, last: null, grade: null };
 }
+// How far the tower's top leans, along both axes, at this moment (zero before Sway).
+function swayAt(s) { return stackStage(s) === 2 ? STACK.sway[s.difficulty] * Math.sin(s.elapsed * 1.15) : 0; }
 export function stepStack(s, input, dt) {
   if (s.phase !== 'playing') return;
   s.elapsed += dt; s.cooldown = Math.max(0, s.cooldown - dt);
+  const stage = stackStage(s), t = s.elapsed;
+  s.gust = stage >= 1 ? STACK.gust[s.difficulty] * (Math.sin(t * 1.3) * .6 + Math.sin(t * 2.9 + 1) * .4) : 0;
+  s.sway = swayAt(s);
+  // The slab rides the lean across its lane, so only its timing along the lane matters.
+  const across = s.axis === 'x' ? 'z' : 'x'; s.moving[across] = s.blocks.at(-1)[across] + s.sway;
   if (!s.cooldown) {
-    const center = s.blocks.at(-1)[s.axis], speed = DIFFICULTIES[s.difficulty].stackSpeed + s.drops * .15;
+    const center = s.blocks.at(-1)[s.axis] + s.sway, speed = (DIFFICULTIES[s.difficulty].stackSpeed + s.drops * .15) * (1 + s.gust);
     s.moving[s.axis] += dt * s.direction * speed;
-    if (Math.abs(s.moving[s.axis] - center) >= 5) { s.moving[s.axis] = center + Math.sign(s.moving[s.axis] - center) * 5; s.direction *= -1; }
+    if (Math.abs(s.moving[s.axis] - center) >= STACK.range) { s.moving[s.axis] = center + Math.sign(s.moving[s.axis] - center) * STACK.range; s.direction *= -1; }
   }
   for (const p of s.pieces) { p.vy -= dt * 8; p.y += p.vy * dt; p.spin += dt * 2; p.life -= dt; }
   s.pieces = s.pieces.filter(p => p.life > 0);
 }
+export function stackGrade(s) {
+  const goal = DIFFICULTIES[s.difficulty].stackGoal, top = s.blocks.at(-1), area = top.w * top.d / (STACK.size * STACK.size);
+  const value = (s.perfect / goal) * .6 + area * .4;
+  return value >= .8 ? 'S' : value >= .6 ? 'A' : value >= .4 ? 'B' : 'C';
+}
 export function dropStack(s) {
   if (s.phase !== 'playing' || s.cooldown > 0) return null;
-  const top = s.blocks.at(-1), moving = s.moving, delta = moving[s.axis] - top[s.axis], perfect = Math.abs(delta) <= .10;
+  // The top in the world, leaning with the sway along the lane; kept blocks are stored upright.
+  const lean = [s.sway, s.sway], under = s.blocks.at(-1), top = { ...under, x: under.x + lean[0], z: under.z + lean[1] };
+  const moving = s.moving, delta = moving[s.axis] - top[s.axis], perfect = Math.abs(delta) <= STACK.perfect;
   if (perfect) moving[s.axis] = top[s.axis];
   const ox = intervalOverlap(moving.x, top.x, moving.w, top.w), oz = intervalOverlap(moving.z, top.z, moving.d, top.d), level = s.blocks.length;
-  if (ox.size < .08 || oz.size < .08) { s.phase = 'lost'; s.events.push({ type: 'miss', text: 'Missed the tower. Try again?' }); return { lost: true }; }
-  const kept = { x: ox.center, z: oz.center, w: ox.size, d: oz.size };
+  if (ox.size < .08 || oz.size < .08) {
+    s.phase = 'lost'; s.grade = stackGrade(s); s.pieces.push({ ...moving, y: level * STACK.height, vy: 0, spin: 0, life: 3, whole: true });
+    s.events.push({ type: 'miss', text: 'Missed the tower. Try again?' }); return { lost: true };
+  }
+  const kept = { x: ox.center - lean[0], z: oz.center - lean[1], w: ox.size, d: oz.size };
   const lostWidth = moving.w - ox.size, lostDepth = moving.d - oz.size;
-  if (lostWidth > .001) s.pieces.push({ x: delta > 0 ? kept.x + ox.size / 2 + lostWidth / 2 : kept.x - ox.size / 2 - lostWidth / 2, z: moving.z, w: lostWidth, d: moving.d, y: level * .55, vy: 0, spin: 0, life: 2 });
-  if (lostDepth > .001) s.pieces.push({ z: delta > 0 ? kept.z + oz.size / 2 + lostDepth / 2 : kept.z - oz.size / 2 - lostDepth / 2, x: moving.x, d: lostDepth, w: moving.w, y: level * .55, vy: 0, spin: 0, life: 2 });
-  s.blocks.push(kept); s.drops++; s.combo = perfect ? s.combo + 1 : 0;
+  if (lostWidth > .001) s.pieces.push({ x: delta > 0 ? ox.center + ox.size / 2 + lostWidth / 2 : ox.center - ox.size / 2 - lostWidth / 2, z: moving.z, w: lostWidth, d: moving.d, y: level * STACK.height, vy: 0, spin: 0, life: 2, side: Math.sign(delta) });
+  if (lostDepth > .001) s.pieces.push({ z: delta > 0 ? oz.center + oz.size / 2 + lostDepth / 2 : oz.center - oz.size / 2 - lostDepth / 2, x: moving.x, d: lostDepth, w: moving.w, y: level * STACK.height, vy: 0, spin: 0, life: 2, side: Math.sign(delta) });
+  s.drops++; s.marks.push(perfect); s.combo = perfect ? s.combo + 1 : 0; s.longestCombo = Math.max(s.longestCombo, s.combo);
   if (perfect) s.perfect++;
+  // A run of perfect drops mends the footprint a little, back toward the slab you started with.
+  let grew = false;
+  if (perfect && s.combo >= STACK.growAfter && (kept.w < STACK.size || kept.d < STACK.size)) {
+    kept.w = Math.min(STACK.size, kept.w + STACK.grow); kept.d = Math.min(STACK.size, kept.d + STACK.grow); s.mended++; grew = true;
+  }
+  s.blocks.push(kept); s.last = { perfect, grew, at: s.elapsed };
   const points = perfect ? 150 + Math.min(5, s.combo - 1) * 25 : 100;
-  s.score += points; s.events.push({ type: perfect ? 'perfect' : 'cut', text: perfect ? `Perfect placement · +${points} · ${s.combo} in a row` : `Level ${s.drops} · ${Math.round(ox.size * oz.size / 16 * 100)}% of the starting footprint remains` });
-  if (s.drops >= DIFFICULTIES[s.difficulty].stackGoal) { s.phase = 'won'; return { perfect, kept }; }
-  s.axis = s.axis === 'x' ? 'z' : 'x'; s.direction = s.drops % 2 ? -1 : 1;
-  s.moving = { ...kept, [s.axis]: kept[s.axis] - s.direction * 5 }; s.cooldown = .14;
-  return { perfect, kept };
+  s.score += points;
+  s.events.push(grew ? { type: 'grow', text: `Perfect · ${s.combo} in a row · the slab grows back · +${points}` }
+    : { type: perfect ? 'perfect' : 'cut', text: perfect ? `Perfect placement · +${points} · ${s.combo} in a row` : `Level ${s.drops} · ${Math.round(kept.w * kept.d / 16 * 100)}% of the starting footprint remains` });
+  if (s.drops >= DIFFICULTIES[s.difficulty].stackGoal) { s.phase = 'won'; s.grade = stackGrade(s); return { perfect, kept, grew }; }
+  const stage = stackStage(s);
+  if (stage !== s.stage) { s.stage = stage; s.events.push({ type: 'stage-start', text: `Stage ${stage + 1} · ${STAGES[stage].name}. ${STAGES[stage].brief}` }); }
+  s.axis = s.axis === 'x' ? 'z' : 'x'; s.direction = s.drops % 2 ? -1 : 1; s.sway = swayAt(s);
+  const start = { ...kept, x: kept.x + s.sway, z: kept.z + s.sway };
+  s.moving = { ...start, [s.axis]: start[s.axis] - s.direction * STACK.range }; s.cooldown = .14;
+  return { perfect, kept, grew };
 }
 export function validateRecords(raw) {
   const result = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
   for (const [key, value] of Object.entries(raw).slice(0, 100)) {
-    if (!/^(flight|flight-v2|stack):(relaxed|standard)$|^maze(-v2)?:(relaxed|standard):\d{1,6}$/.test(key)) continue;
+    if (!/^(flight|flight-v2|stack|stack-v2):(relaxed|standard)$|^maze(-v2)?:(relaxed|standard):\d{1,6}$/.test(key)) continue;
     if (!Number.isFinite(value) || value < 0 || value > 1000000) continue;
     result[key] = value;
   }
   return result;
 }
 // Ring Runner's three-sector course scores differently from the first course, so its bests start afresh.
-// The Green Room's three floors take longer than its first single floor, so its times start afresh too.
-export function recordKey(s) { return `${s.mode === 'flight' ? 'flight-v2' : s.mode === 'maze' ? 'maze-v2' : s.mode}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
+// The Green Room's three floors take longer than its first single floor, so its times start afresh too,
+// and Sky Stack's mending and stages change its scores.
+export function recordKey(s) { return `${s.mode === 'flight' ? 'flight-v2' : s.mode === 'maze' ? 'maze-v2' : 'stack-v2'}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
 export function updateRecord(records, s) {
   if (!['won', 'lost'].includes(s.phase)) return false;
   const key = recordKey(s);

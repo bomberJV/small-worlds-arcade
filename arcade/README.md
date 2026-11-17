@@ -10,13 +10,20 @@ Serve the extracted collection root using `python3 -m http.server 8000`, then op
 
 ### Ring Runner
 
-Fly a fixed three-sector course, preserving three shields. Standard pace has 18 rings; Easygoing has 15 wider rings and a lower flight speed. Rings ahead are visible, the next target is highlighted, and a small radar points toward its center.
+Fly a fixed course of three sectors, each with its own rule, keeping three shields. Standard pace has eight rings per sector (24); Easygoing has six wider rings per sector (18), slower flight, fewer rocks and gentler movement.
 
-- Steer with arrows/WASD, hold the on-screen arrows, or drag the view to aim.
-- A pass earns 100 points; a center pass earns 150. A streak adds up to 100 points per ring.
-- Three misses end a run. Best scores are separate for each pace.
-- The course is deliberately repeatable, so personal bests at a given pace are comparable. The seeded star field is decorative.
-- Crossing detection interpolates the ship position at the ring plane, rather than judging a later frame position.
+1. **Low orbit.** Still rings over a ringed planet: learn the line.
+2. **Debris field.** The rings drift, and rocks cross the lane between them. A rock costs a shield.
+3. **Nebula.** The rings breathe, shrinking to about three quarters of their width and opening again. Go through while they are open.
+
+- Steer with arrows/WASD, hold the on-screen arrows, or drag the view to aim. Hold Space (or the Boost button) to boost.
+- A pass earns 100 points, a center pass 150, and a streak adds up to 100 per ring. Boost flies 45% faster and scores half as much again per ring. It drains while held, and center passes (more) and clean passes (less) refill it.
+- A missed ring or a rock costs a shield; three end the run. A shield cell waits a short detour off the line in the debris field and the nebula; with full shields it is worth 250 points.
+- Each sector closes with a medal: gold for every ring with at least 60% dead center, silver for every ring, bronze for half. A finished run is graded S to C against the best score possible without boost.
+- The course is deliberately repeatable, so personal bests at a given pace are comparable. Bests from the original one-sector course are kept under their old key and not compared with this one.
+- Crossing detection interpolates the ship position, and the run's clock, at each ring and rock plane, rather than judging a later frame position. A drifting or breathing ring is judged where it was at the moment of crossing.
+
+The scene (`flight3d.js`) is a chase camera behind a faceted ship, with lit rings drawn in two halves so the ship passes between them, a sky for each sector (a ringed planet, a broken moon and its debris, a nebula with the star the course ends at), lit rocks, an engine trail and dust that streaks on boost. Before a run the camera circles the ship; at the start it swings round behind it; at the finish it pulls back. With reduced motion the camera does not circle, swing, bank or shake.
 
 ### The Green Room
 
@@ -50,7 +57,8 @@ Scores, crystals, levels, status, controls and completion messages are exposed a
 ## Code
 
 - `engine.js`: pure game rules, seeded maze generation, collision geometry, scoring, record validation and DDA ray intersections.
-- `render.js`: perspective flight scene, ray-cast maze and isometric tower.
+- `render.js`: the ray-cast maze and isometric tower, and the entry point for all three.
+- `flight3d.js`: Ring Runner's scene and cameras.
 - `app.js`: input, fixed-step loop, UI, pause handling, optional sound and local records.
 - `index.html`, `app.css`: cabinet UI and responsive layout.
 - `../shared/`: shared canvas sizing, base styling and storage utilities.

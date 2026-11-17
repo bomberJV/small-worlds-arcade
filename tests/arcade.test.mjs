@@ -1,16 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTIES, createFlight, evaluateRing, stepFlight, createMaze, mazeDistances, walkable, stepMaze, castRay, createStack, dropStack, stepStack, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
+import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, createStack, dropStack, stepStack, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
 
 test('flight course is completable by ordinary steering at both paces', () => {
   for (const difficulty of Object.keys(DIFFICULTIES)) {
     const state = createFlight(difficulty); state.phase = 'playing';
     for (let i = 0; i < 90 * 90 && state.phase === 'playing'; i++) {
-      const ring = state.rings.find(r => !r.result);
-      stepFlight(state, { target: { x: ring.x, y: ring.y } }, 1 / 90);
+      const ring = state.rings.find(r => !r.result), place = ringAt(ring, state.elapsed);
+      stepFlight(state, { target: { x: place.x, y: place.y } }, 1 / 90);
     }
-    assert.equal(state.phase, 'won'); assert.equal(state.shields, 3); assert.equal(state.passed, state.rings.length); assert.ok(state.perfect >= state.rings.length - 1);
+    assert.equal(state.phase, 'won'); assert.equal(state.shields, 3); assert.equal(state.impacts, 0); assert.equal(state.passed, state.rings.length);
+    assert.ok(state.perfect >= state.rings.length - 1);
+    assert.deepEqual(state.medals, ['gold', 'gold', 'gold']); assert.equal(state.grade, 'S');
+    assert.equal(state.rings.length, DIFFICULTIES[difficulty].ringsPerSector * SECTORS.length);
   }
+});
+test('each sector has its own rule: still rings, drifting rings with rocks, breathing rings', () => {
+  const state = createFlight();
+  const by = k => state.rings.filter(r => r.sector === k);
+  assert.ok(by(0).every(r => !r.drift && !r.pulse));
+  assert.ok(by(1).every(r => r.drift && !r.pulse)); assert.ok(state.rocks.length === DIFFICULTIES.standard.rocks);
+  assert.ok(by(2).every(r => r.pulse && !r.drift));
+  const drifting = by(1)[0], a = ringAt(drifting, 0), b = ringAt(drifting, 1.5);
+  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) > .05); assert.equal(a.radius, drifting.radius);
+  const breathing = by(2)[0], sizes = [0, .4, .8, 1.2, 1.6, 2].map(t => ringAt(breathing, t).radius);
+  assert.ok(Math.min(...sizes) < breathing.radius * .85 && Math.max(...sizes) <= breathing.radius);
+  // Every rock sits off the line between the rings it lies between, by more than a ring can drift.
+  const field = by(1);
+  for (const rock of state.rocks) {
+    const i = field.findIndex((r, k) => field[k + 1] && r.z <= rock.z && field[k + 1].z >= rock.z), a = field[i], c = field[i + 1], t = (rock.z - a.z) / (c.z - a.z);
+    assert.ok(Math.hypot(rock.x - (a.x + (c.x - a.x) * t), rock.y - (a.y + (c.y - a.y) * t)) > rock.r + DIFFICULTIES.standard.drift + .5);
+  }
+});
+test('a rock costs a shield once, and a shield cell gives one back', () => {
+  const state = createFlight(); state.phase = 'playing'; state.shields = 2;
+  const rock = state.rocks[0]; state.rings.forEach(r => { r.result = r.z < rock.z ? 'hit' : null; });
+  state.passed = state.rings.filter(r => r.result).length; state.sector = 1;
+  state.z = rock.z - .5; state.x = rock.x; state.y = rock.y;
+  stepFlight(state, { target: { x: rock.x, y: rock.y } }, .1);
+  assert.equal(rock.hit, true); assert.equal(state.shields, 1); assert.equal(state.impacts, 1);
+  stepFlight(state, { target: { x: rock.x, y: rock.y } }, .1); assert.equal(state.shields, 1);
+  const cell = state.cells[0]; state.z = cell.z - .5; state.x = cell.x; state.y = cell.y; state.vx = state.vy = 0;
+  state.rings.forEach(r => { if (r.z < cell.z) r.result = r.result || 'hit'; });
+  stepFlight(state, { target: { x: cell.x, y: cell.y } }, .1);
+  assert.equal(cell.taken, true); assert.equal(state.shields, 2);
+  assert.ok(state.events.some(e => e.type === 'impact') && state.events.some(e => e.type === 'pickup'));
+});
+test('boost flies faster, drains while held, scores half again, and center passes refill it', () => {
+  const plain = createFlight(), boosted = createFlight(); plain.phase = boosted.phase = 'playing';
+  stepFlight(plain, {}, .5); stepFlight(boosted, { boost: true }, .5);
+  assert.ok(Math.abs(boosted.z / plain.z - BOOST.speed) < 1e-9); assert.ok(Math.abs(boosted.boost - (1 - BOOST.drain * .5)) < 1e-9);
+  const empty = createFlight(); empty.phase = 'playing'; empty.boost = 0; stepFlight(empty, { boost: true }, .5); assert.equal(empty.boosting, false); assert.equal(empty.z, plain.z);
+  const s = createFlight(); s.phase = 'playing'; s.boost = .5; s.z = 23.9;
+  stepFlight(s, { boost: true, target: { x: 0, y: 0 } }, .05);
+  assert.equal(s.rings[0].result, 'perfect'); assert.equal(s.score, 225); assert.ok(Math.abs(s.boost - (.5 - BOOST.drain * .05 + BOOST.perfect)) < 1e-9);
+});
+test('sectors are announced, closed with a medal, and the run ends with a grade', () => {
+  const state = createFlight('relaxed'); state.phase = 'playing';
+  for (let i = 0; i < 90 * 90 && state.phase === 'playing'; i++) {
+    const ring = state.rings.find(r => !r.result), place = ringAt(ring, state.elapsed), sloppy = ring.sector === 1 ? 1.1 : 0;
+    stepFlight(state, { target: { x: place.x + sloppy * place.radius * .5, y: place.y } }, 1 / 90);
+    state.events.length > 40 && state.events.splice(0, 20);
+  }
+  assert.equal(state.phase, 'won');
+  assert.equal(state.medals.length, 3); assert.equal(state.medals[0], 'gold'); assert.notEqual(state.medals[1], 'gold');
+  assert.ok(['S', 'A', 'B', 'C'].includes(state.grade)); assert.ok(state.score <= flightPar(state) * BOOST.points);
 });
 test('three ring misses end the run and cannot award repeated scores', () => {
   const state = createFlight(); state.phase = 'playing'; state.x = 5.8; state.y = 3.6;
@@ -77,8 +131,9 @@ test('tower input cooldown rejects accidental double taps', () => {
   assert.equal(dropStack(s), null); assert.equal(s.score, score); stepStack(s, {}, .2); assert.equal(s.cooldown, 0);
 });
 test('records reject malformed storage and use fastest completed maze run per seed', () => {
-  const result = validateRecords({ 'flight:standard': 1200, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
-  assert.deepEqual(result, { 'flight:standard': 1200, 'maze:standard:73': 52.1 });
+  const result = validateRecords({ 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
+  assert.deepEqual(result, { 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'maze:standard:73': 52.1 });
+  assert.equal(recordKey(createFlight('relaxed')), 'flight-v2:relaxed');
   assert.deepEqual(validateRecords(['bad']), {}); assert.deepEqual(validateRecords(null), {});
   const s = createMaze(); s.phase = 'won'; s.elapsed = 45.4; assert.equal(updateRecord(result, s), true); assert.equal(result[recordKey(s)], 45.4);
   s.elapsed = 48; assert.equal(updateRecord(result, s), false); s.phase = 'lost'; s.elapsed = 1; assert.equal(updateRecord(result, s), false);

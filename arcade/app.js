@@ -1,5 +1,5 @@
 import { canvasSize, safeLoad, safeSave } from '../shared/core.js';
-import { DIFFICULTIES, SECTORS, FLOORS, STAGES, createFlight, createMaze, createStack, stepFlight, stepMaze, stepStack, dropStack, validateRecords, updateRecord, recordKey } from './engine.js';
+import { DIFFICULTIES, SECTORS, FLOORS, STAGES, createFlight, createMaze, createStack, stepFlight, stepMaze, stepStack, settleStack, dropStack, validateRecords, updateRecord, recordKey } from './engine.js';
 import { renderGame } from './render.js';
 
 const $ = selector => document.querySelector(selector), canvas = $('#game'), surface = canvasSize(canvas), reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -90,7 +90,7 @@ function frame(now) {
   if (state.phase === 'playing') {
     accumulated += elapsed; const command = input();
     while (accumulated >= 1 / 90 && state.phase === 'playing') { steppers[mode](state, command, 1 / 90); accumulated -= 1 / 90; }
-  } else accumulated = 0;
+  } else { accumulated = 0; if (mode === 'stack' && elapsed) settleStack(state, elapsed); }
   for (const event of state.events.splice(0)) feedback(event, now);
   if (['won', 'lost'].includes(state.phase) && !finished) complete();
   if (lastPhase !== state.phase) { lastPhase = state.phase; syncOverlay(); }
@@ -100,7 +100,8 @@ function frame(now) {
   // Each game keeps moving before a run (the camera circles) and for a few seconds after it.
   if (['won', 'lost'].includes(state.phase) && !endedAt) endedAt = now;
   const scene = !reduceMotion.matches && (state.phase === 'ready' || (endedAt && now - endedAt < 3500));
-  if (state.phase === 'playing' || feedbackUntil || scene) requestFrame();
+  // Offcuts still falling after a Sky Stack run finish their fall, with or without reduced motion.
+  if (state.phase === 'playing' || feedbackUntil || scene || (mode === 'stack' && state.pieces.length)) requestFrame();
 }
 function requestFrame() { if (!frameId && visible && !document.hidden) frameId = requestAnimationFrame(frame); }
 new ResizeObserver(requestFrame).observe(canvas);
@@ -157,7 +158,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) pause
 $('#start-game').addEventListener('click', start); $('#pause-game').addEventListener('click', togglePause); $('#action').addEventListener('click', act);
 $('#difficulty').addEventListener('change', event => { difficulty = event.target.value; reset('Pace changed. Start a fresh run when you’re ready.'); });
 $('#new-maze').addEventListener('click', () => { seed = seed >= 999999 ? 1 : seed + 1; reset(`Maze ${seed} is ready. Three crystals, one exit.`); });
-$('#map-toggle').addEventListener('click', () => { state.reveal = !state.reveal; $('#map-toggle').setAttribute('aria-pressed', state.reveal); $('#map-toggle').textContent = state.reveal ? 'Hide full map' : 'Reveal map'; requestFrame(); });
+$('#map-toggle').addEventListener('click', () => { state.reveal = !state.reveal; $('#map-toggle').setAttribute('aria-pressed', state.reveal); $('#map-toggle').textContent = state.reveal ? 'Hide full map' : 'Reveal map'; if (state.phase === 'playing') canvas.focus({ preventScroll: true }); requestFrame(); });
 for (const button of document.querySelectorAll('[data-game]')) button.addEventListener('click', () => { mode = button.dataset.game; reset(); });
 $('#sound-toggle').addEventListener('click', async () => {
   if (soundEnabled) { soundEnabled = false; $('#sound-toggle').textContent = 'Sound off'; $('#sound-toggle').setAttribute('aria-pressed', false); return; }

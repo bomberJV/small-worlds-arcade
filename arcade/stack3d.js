@@ -105,7 +105,7 @@ export function stackScene(ctx, w, h, s, { now = 0, reduced = false } = {}) {
   const bump = m.dropAt !== null && !reduced ? Math.sin(clamp((now - m.dropAt) / 260, 0, 1) * Math.PI) * .09 : 0;
   const fit = Math.max(14, top * 1.1 + 8), R = mix(14, fit, ended);
   const targetY = mix(m.camY + .3 - bump, top * .5, ended), az = Math.PI / 4 + m.orbit + (reduced ? 0 : Math.sin(now * .00013) * .05);
-  const eye = [Math.cos(az) * R * .86, targetY + R * mix(.42, .22, ended), Math.sin(az) * R * .86], target = [0, targetY, 0];
+  const eye = [Math.cos(az) * R * .86, targetY + R * mix(.42, .3, ended), Math.sin(az) * R * .86], target = [0, targetY, 0];
   // Enough lens to take in the slab's whole run across the lane, wide or tall screen.
   const dist = Math.hypot(...sub(eye, target)), focal = Math.min(w * dist / 16, h * dist / (ended ? Math.max(11, top + 4) : 11));
   const cam = camera(eye, target, focal, w / 2, h / 2 + (w < h ? h * .04 : 0));
@@ -197,7 +197,7 @@ function tower(ctx, cam, s, sky, light, now, reduced, m, night) {
   const colourOf = i => hsl(78 + i * 7, 52, 58);
   const behind = [], front = [];
   for (const p of s.pieces) (dot(sub([p.x, 0, p.z], [0, 0, 0]), norm([cam.eye[0], 0, cam.eye[2]])) < 0 ? behind : front).push(p);
-  const piece = p => box(ctx, cam, sky, light, corners(p.x, p.y, p.z, p.w, H, p.d, { axis: p.w < p.d || p.whole && s.axis === 'z' ? 'x' : 'z', angle: (p.side || 1) * p.spin * .8 }), colourOf(n), { alpha: clamp(p.life, 0, 1) });
+  const piece = p => box(ctx, cam, sky, light, corners(p.x, p.y, p.z, p.w, H, p.d, { axis: p.w < p.d || p.whole && s.axis === 'z' ? 'x' : 'z', angle: (p.side || 1) * p.spin * .8 * (1 - ease(p.settle || 0)) }), colourOf(n), { alpha: clamp(p.life, 0, 1) });
   behind.forEach(piece);
   // Bottom to top; at night each slab's top edge glows as it is laid, so the tower reads as a column of light.
   s.blocks.forEach((b, i) => {
@@ -245,11 +245,13 @@ function overlay(ctx, w, h, s, m, now, reduced, night) {
   }
   ctx.font = `600 ${small ? 9 : 10}px ui-monospace, monospace`; ctx.fillStyle = ink + '.75)'; ctx.textAlign = 'left';
   ctx.fillText(`STAGE ${s.stage + 1}/3 · ${STAGES[s.stage].name.toUpperCase()}${s.combo > 1 ? ` · ${s.combo} PERFECT IN A ROW` : ''}`, x0, y0 - 8);
-  // Wind: an arrow that grows and shrinks with the gusts.
+  // Wind: a meter of the slab's speed, past the middle in a gust and short of it in a lull.
   if (s.stage === 1 && s.phase === 'playing') {
-    const cx = w - 70, cy = h - 34, len = 18 + Math.abs(m.wind) * 70, dir = Math.sign(m.wind || 1);
-    ctx.strokeStyle = ink + '.7)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx - dir * len / 2, cy); ctx.lineTo(cx + dir * len / 2, cy); ctx.lineTo(cx + dir * (len / 2 - 6), cy - 5); ctx.moveTo(cx + dir * len / 2, cy); ctx.lineTo(cx + dir * (len / 2 - 6), cy + 5); ctx.stroke(); ctx.lineWidth = 1;
-    ctx.textAlign = 'center'; ctx.fillText(m.wind * (s.direction || 1) > 0 ? 'GUST' : 'LULL', cx, cy - 12); ctx.textAlign = 'left';
+    const limit = STACK.gust[s.difficulty], k = clamp(m.wind / limit, -1, 1), bw = 64, cx = w - 22 - bw, cy = h - 30;
+    ctx.fillStyle = ink + '.18)'; ctx.fillRect(cx, cy, bw, 5);
+    ctx.fillStyle = k > .15 ? 'rgba(255,190,110,.95)' : k < -.15 ? 'rgba(140,200,255,.95)' : ink + '.7)'; ctx.fillRect(cx, cy, bw * (.5 + k * .5), 5);
+    ctx.fillStyle = ink + '.6)'; ctx.fillRect(cx + bw / 2, cy - 3, 1, 11);
+    ctx.fillStyle = ink + '.75)'; ctx.fillText(k > .15 ? 'GUST · FASTER' : k < -.15 ? 'LULL · SLOWER' : 'WIND', cx, cy - 8);
   }
   // The stage's title, as it begins.
   if (m.stageAt !== null && now - m.stageAt < 2800 && s.phase === 'playing') {

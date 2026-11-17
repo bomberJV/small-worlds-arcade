@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, FLOORS, SPRINT, WALK, inSight, createStack, dropStack, stepStack, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
+import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, FLOORS, SPRINT, WALK, inSight, createStack, dropStack, stepStack, STAGES, STACK, stackStage, stackGrade, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
 
 test('flight course is completable by ordinary steering at both paces', () => {
   for (const difficulty of Object.keys(DIFFICULTIES)) {
@@ -180,13 +180,60 @@ test('perfect placements preserve size, increase score, and complete both goals'
     const score = s.score; dropStack(s); assert.equal(s.score, score);
   }
 });
+// Drop the slab exactly over where the top is now, leaning with any sway.
+const dropOnTop = (s, offset = 0) => { s.cooldown = 0; const top = s.blocks.at(-1); s.moving = { ...top, x: top.x + s.sway + (s.axis === 'x' ? offset : 0), z: top.z + s.sway + (s.axis === 'z' ? offset : 0) }; return dropStack(s); };
+test('the climb moves through three stages with a title for each', () => {
+  for (const difficulty of Object.keys(DIFFICULTIES)) {
+    const s = createStack(difficulty), goal = DIFFICULTIES[difficulty].stackGoal; s.phase = 'playing';
+    const starts = [];
+    for (let i = 0; i < goal; i++) { stepStack(s, {}, .3); dropOnTop(s); starts.push(...s.events.splice(0).filter(e => e.type === 'stage-start').map(() => s.drops)); }
+    assert.deepEqual(starts, [goal / 3, goal * 2 / 3]); assert.equal(s.phase, 'won'); assert.equal(s.grade, 'S');
+  }
+  assert.equal(STAGES.length, 3);
+});
+test('wind changes the slab speed only from stage two, and sway only in stage three', () => {
+  const s = createStack(); s.phase = 'playing';
+  for (let i = 0; i < 40; i++) { stepStack(s, {}, .05); assert.equal(s.gust, 0); assert.equal(s.sway, 0); }
+  while (stackStage(s) < 1) { stepStack(s, {}, .05); dropOnTop(s); }
+  const gusts = new Set(); for (let i = 0; i < 80; i++) { stepStack(s, {}, .05); gusts.add(s.gust.toFixed(3)); assert.equal(s.sway, 0); assert.ok(Math.abs(s.gust) <= STACK.gust.standard + 1e-9); }
+  assert.ok(gusts.size > 20);
+  while (stackStage(s) < 2) { stepStack(s, {}, .05); dropOnTop(s); }
+  let most = 0; for (let i = 0; i < 120; i++) { stepStack(s, {}, .05); most = Math.max(most, Math.abs(s.sway)); }
+  assert.ok(most > STACK.sway.standard * .9 && most <= STACK.sway.standard + 1e-9);
+});
+test('with sway, the slab rides the lean across its lane; dropping over the upright top cuts it, dropping where the top leans is perfect', () => {
+  const s = createStack(); s.phase = 'playing';
+  while (stackStage(s) < 2) { stepStack(s, {}, .05); dropOnTop(s); }
+  while (Math.abs(s.sway) < .4) stepStack(s, {}, .02);
+  const across = s.axis === 'x' ? 'z' : 'x'; assert.ok(Math.abs(s.moving[across] - s.blocks.at(-1)[across] - s.sway) < 1e-9);
+  const lean = s.sway, before = s.blocks.at(-1);
+  const r = dropOnTop(s); assert.equal(r.perfect, true);
+  assert.ok(Math.abs(s.blocks.at(-1).x - before.x) < 1e-9 && Math.abs(s.blocks.at(-1).z - before.z) < 1e-9, 'kept upright under the lean');
+  while (Math.abs(s.sway) < .4) stepStack(s, {}, .02);
+  const r2 = dropOnTop(s, -s.sway); assert.equal(r2.perfect, false); assert.ok(s.pieces.length > 0); void lean;
+});
+test('three perfect drops in a row mend the footprint, never past the starting slab', () => {
+  const s = createStack(); s.phase = 'playing';
+  dropOnTop(s, 1); assert.equal(s.blocks.at(-1).w, 3);
+  dropOnTop(s); dropOnTop(s); assert.equal(s.blocks.at(-1).w, 3);
+  const r = dropOnTop(s); assert.equal(r.grew, true); assert.equal(s.blocks.at(-1).w, 3 + STACK.grow); assert.equal(s.blocks.at(-1).d, Math.min(4, 4 + STACK.grow)); assert.equal(s.mended, 1);
+  assert.equal(s.events.at(-1).type, 'grow');
+  for (let i = 0; i < 8; i++) dropOnTop(s);
+  assert.equal(s.blocks.at(-1).w, 4); assert.equal(s.blocks.at(-1).d, 4);
+});
+test('a grade weighs perfect drops and the footprint left', () => {
+  const s = createStack(); s.drops = 18; s.perfect = 18; assert.equal(stackGrade(s), 'S');
+  s.perfect = 0; s.blocks.push({ x: 0, z: 0, w: 1, d: 1 }); assert.equal(stackGrade(s), 'C');
+  s.perfect = 12; s.blocks.push({ x: 0, z: 0, w: 4, d: 2 }); assert.equal(stackGrade(s), 'A');
+  assert.equal(recordKey(createStack('relaxed')), 'stack-v2:relaxed');
+});
 test('tower input cooldown rejects accidental double taps', () => {
   const s = createStack(); s.phase = 'playing'; s.moving = { ...s.blocks.at(-1) }; dropStack(s); const score = s.score;
   assert.equal(dropStack(s), null); assert.equal(s.score, score); stepStack(s, {}, .2); assert.equal(s.cooldown, 0);
 });
 test('records reject malformed storage and use fastest completed maze run per seed', () => {
-  const result = validateRecords({ 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
-  assert.deepEqual(result, { 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5 });
+  const result = validateRecords({ 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5, 'stack-v2:standard': 2400, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
+  assert.deepEqual(result, { 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5, 'stack-v2:standard': 2400 });
   assert.equal(recordKey(createFlight('relaxed')), 'flight-v2:relaxed');
   assert.deepEqual(validateRecords(['bad']), {}); assert.deepEqual(validateRecords(null), {});
   const s = createMaze(); s.phase = 'won'; s.elapsed = 45.4; assert.equal(updateRecord(result, s), true); assert.equal(result[recordKey(s)], 45.4);

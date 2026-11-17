@@ -40,13 +40,17 @@ The scene (`room3d.js`) is real 3D in Canvas 2D: wall panels in each floor's mat
 
 ### Sky Stack
 
-Drop the moving slab over the tower. Every overhang is cut from the next footprint and rendered as a falling piece. The active axis alternates each level.
+Drop the moving slab over the tower. Every overhang is cut from the next footprint and falls away. The active lane alternates each level. The climb has three stages, a third of the levels each:
 
-- Press Space, tap the tower, or click Drop block.
-- Complete 18 levels on Standard or 12 on Easygoing.
-- Close drops snap into place without shrinking the footprint. Perfect streaks earn extra points; ordinary overlaps still earn 100 points.
-- A miss ends the run. A short input cooldown prevents accidental double taps from dropping the next slab immediately.
-- The rendering is a 3D isometric projection. Falling pieces are illustrative effects, not a rigid-body physics solver.
+- **Morning**: plain stacking. Find your timing.
+- **Wind**: gusts speed the slab up and slow it down; an arrow shows gust and lull.
+- **Sway**: the whole tower leans back and forth. The slab rides the lean across its lane, so only your timing along the lane matters, but you must drop where the leaning top will be.
+- Press Space, tap the tower, or click Drop block. Complete 18 levels on Standard or 12 on Easygoing (slower, gentler gusts, less sway).
+- Close drops snap into place. Three perfect drops in a row grow the slab back a little each time, never past the starting size.
+- A dotted outline marks the top at the slab's height, and the slab's shadow on the top shows what you would keep.
+- A miss ends the run. A finished climb gets a grade from S to C, weighing perfect drops and the footprint left. Records use `stack-v2`; scores from before the stages are kept but not compared.
+
+The scene (`stack3d.js`) builds the tower on a rooftop above a small city, through a morning sky, a windy afternoon among drifting clouds, and a night of stars and lit windows when each slab's edge glows. The camera rises with the tower, nudges on each drop, and pulls back at the end to show the whole climb; before a run it circles the roof. With reduced motion the camera holds still and the sky changes at once.
 
 ## Controls and behavior
 
@@ -59,9 +63,10 @@ Scores, crystals, levels, status, controls and completion messages are exposed a
 ## Code
 
 - `engine.js`: pure game rules, seeded maze generation, collision geometry, scoring, record validation and DDA ray intersections.
-- `render.js`: the isometric tower, and the entry point for all three.
+- `render.js`: the entry point for all three scenes.
 - `flight3d.js`: Ring Runner's scene and cameras.
 - `room3d.js`: The Green Room's scene, lights and cameras.
+- `stack3d.js`: Sky Stack's scene, skies and camera.
 - `app.js`: input, fixed-step loop, UI, pause handling, optional sound and local records.
 - `index.html`, `app.css`: cabinet UI and responsive layout.
 - `../shared/`: shared canvas sizing, base styling and storage utilities.

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, FLOORS, SPRINT, WALK, inSight, createStack, dropStack, stepStack, STAGES, STACK, stackStage, stackGrade, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
+import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, FLOORS, SPRINT, WALK, inSight, createStack, dropStack, stepStack, settleStack, STAGES, STACK, stackStage, stackGrade, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
 
 test('flight course is completable by ordinary steering at both paces', () => {
   for (const difficulty of Object.keys(DIFFICULTIES)) {
@@ -143,6 +143,11 @@ test('the warden hunts you when it sees you, costs a spark, sends you back, and 
   s.grace = 0; stepMaze(s, {}, .01); assert.equal(s.sparks, 1);
   s.grace = 0; s.warden.x = s.x; s.warden.y = s.y; stepMaze(s, {}, .01); assert.equal(s.sparks, 0); assert.equal(s.phase, 'lost');
 });
+test('after a catch you are back on the stairs facing the way the floor starts', () => {
+  const s = createMaze('standard', 5); s.phase = 'playing'; clearFloor(s); clearFloor(s);
+  const start = s.a; s.x = 3.5; s.a = start + 2; s.warden.x = s.x; s.warden.y = s.y; s.warden.target = null; s.grace = 0;
+  stepMaze(s, {}, .01); assert.equal(s.caught, 1); assert.equal(s.a, start); assert.equal(s.x, 1.5);
+});
 test('sprint is faster, drains stamina, and only recovers when you ease off', () => {
   const grid = ['1111111111111111111111', '1000000000000000000001', '1111111111111111111111'];
   const walk = createMaze(), run = createMaze();
@@ -220,6 +225,28 @@ test('three perfect drops in a row mend the footprint, never past the starting s
   assert.equal(s.events.at(-1).type, 'grow');
   for (let i = 0; i < 8; i++) dropOnTop(s);
   assert.equal(s.blocks.at(-1).w, 4); assert.equal(s.blocks.at(-1).d, 4);
+});
+test('offcuts land on a wider slab below or on the roof, settle, and fade, even after the run ends', () => {
+  const s = createStack(); s.phase = 'playing';
+  dropOnTop(s, 1.5);                                   // a cut on level 1 falls past the base slab onto the roof
+  const cut = s.pieces[0]; assert.ok(cut);
+  for (let i = 0; i < 60; i++) stepStack(s, {}, 1 / 60);
+  assert.equal(cut.landed, true); assert.equal(cut.y, 0);
+  s.blocks.push({ x: 0, z: 0, w: 1, d: 1 }); s.pieces.push({ x: 1.6, z: 0, w: 1, d: 4, y: 5, vy: 0, spin: 0, life: 2 });
+  const over = s.pieces.at(-1); for (let i = 0; i < 120; i++) settleStack(s, 1 / 60);
+  assert.equal(over.landed, true); assert.equal(over.y, 2 * STACK.height, 'lands on the wider slab below, not the narrow top');
+  s.phase = 'lost'; s.pieces.push({ x: 0, z: 9, w: 1, d: 1, y: 5, vy: 0, spin: 0, life: 2 }); const far = s.pieces.at(-1);
+  settleStack(s, .5); assert.ok(far.y < 5 && !far.landed, 'keeps falling off the roof after the run');
+  for (let i = 0; i < 300; i++) settleStack(s, 1 / 60); assert.equal(s.pieces.length, 0);
+});
+test('wind and sway build up as their stage begins instead of arriving at once', () => {
+  const s = createStack(); s.phase = 'playing';
+  while (stackStage(s) < 1) { stepStack(s, {}, .05); dropOnTop(s); }
+  stepStack(s, {}, .02); assert.ok(Math.abs(s.gust) < STACK.gust.standard * .05);
+  while (stackStage(s) < 2) { stepStack(s, {}, .05); dropOnTop(s); }
+  stepStack(s, {}, .02); assert.ok(Math.abs(s.sway) < STACK.sway.standard * .05);
+  let prev = s.sway, jump = 0; for (let i = 0; i < 300; i++) { stepStack(s, {}, 1 / 60); jump = Math.max(jump, Math.abs(s.sway - prev)); prev = s.sway; }
+  assert.ok(jump < .02, `sway moved ${jump} in one frame`);
 });
 test('a grade weighs perfect drops and the footprint left', () => {
   const s = createStack(); s.drops = 18; s.perfect = 18; assert.equal(stackGrade(s), 'S');

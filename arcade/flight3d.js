@@ -277,8 +277,10 @@ function backdrop(ctx, w, h, cam, k0, k1, kt, now, reduced, s) {
       const r = unit * (.03 + .05 * near), flare = ctx.createRadialGradient(sun[0], sun[1], 0, sun[0], sun[1], r * 9);
       flare.addColorStop(0, '#fff7e2'); flare.addColorStop(.08, '#ffe3a8cc'); flare.addColorStop(.35, '#f0a8d033'); flare.addColorStop(1, '#f0a8d000');
       ctx.fillStyle = flare; ctx.fillRect(sun[0] - r * 9, sun[1] - r * 9, r * 18, r * 18);
-      ctx.strokeStyle = `rgba(255,236,200,${.12 + .2 * near})`; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(sun[0] - r * 14, sun[1]); ctx.lineTo(sun[0] + r * 14, sun[1]); ctx.stroke();
+      // A soft horizontal flare that fades toward its ends, never wider than a third of the screen.
+      const half = Math.min(r * 9, w / 6), streak = ctx.createLinearGradient(sun[0] - half, 0, sun[0] + half, 0), a = .12 + .2 * near;
+      streak.addColorStop(0, 'rgba(255,236,200,0)'); streak.addColorStop(.5, `rgba(255,236,200,${a})`); streak.addColorStop(1, 'rgba(255,236,200,0)');
+      ctx.strokeStyle = streak; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(sun[0] - half, sun[1]); ctx.lineTo(sun[0] + half, sun[1]); ctx.stroke();
     }
     ctx.restore();
   }

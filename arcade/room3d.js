@@ -256,7 +256,8 @@ export function roomScene(ctx, w, h, s, { now = 0, reduced = false } = {}) {
   // Fog thins as the camera climbs, so the view from above shows the whole floor.
   const density = look.density * clamp(1.6 - eye[1] * .6, .08, 1), reach = Math.min(24, 4.6 / density);
   // Above the walls a soft light from overhead shows the floor's plan; it fades as you descend.
-  const sky = look.sky * clamp((eye[1] - 1) / 3, 0, 1);
+  // Escaping, the camera rises into more light, so even the dark floors show the way you came.
+  const sky = (look.sky + (s.phase === 'won' ? .18 : 0)) * clamp((eye[1] - 1) / 3, 0, 1);
 
   // Lights for this frame.
   const flick = (l, i) => look.lamp?.flicker && !reduced ? (Math.sin(now * .004 + l.phase) > .93 || Math.sin(now * .013 + i) > .97 ? .25 : .92 + Math.sin(now * .02 + l.phase) * .08) : 1;

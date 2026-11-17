@@ -189,7 +189,8 @@ function buildFloor(s, index) {
       [...targets, exitCell].every(t => Math.hypot(t[0] - cell[0], t[1] - cell[1]) >= 2)) ?? cells[Math.floor(cells.length / 3)];
     warden = { x: far.cell[0] + .5, y: far.cell[1] + .5, home: [far.cell[0] + .5, far.cell[1] + .5], target: null, from: null, speed: spec.warden[s.difficulty], hunting: false, seen: 0 };
   }
-  Object.assign(s, { floor: index, floorAt: s.elapsed, grid: rows, x: 1.5, y: 1.5, a: rows[1][2] === '0' ? 0 : Math.PI / 2,
+  const a = rows[1][2] === '0' ? 0 : Math.PI / 2;
+  Object.assign(s, { floor: index, floorAt: s.elapsed, grid: rows, x: 1.5, y: 1.5, a, startA: a,
     gems: targets.map(([x, y]) => ({ x: x + .5, y: y + .5, got: false })), exit: { x: exitCell[0] + .5, y: exitCell[1] + .5 }, collected: 0,
     visited: new Set(['1,1']), trail: [[1.5, 1.5]], lockNotice: false, lantern, warden, grace: 0, door: 0 });
 }
@@ -255,7 +256,7 @@ export function stepMaze(s, input, dt) {
       if (s.sparks <= 0) { s.phase = 'lost'; s.events.push({ type: 'caught', text: 'The warden caught you. No sparks left.' }); return; }
       s.events.push({ type: 'caught', text: `The warden caught you. ${s.sparks} ${s.sparks === 1 ? 'spark' : 'sparks'} left; back to the stairs.` });
       // Back to the start of the floor; crystals already found stay found.
-      Object.assign(s, { x: 1.5, y: 1.5, grace: 2 }); Object.assign(s.warden, { x: s.warden.home[0], y: s.warden.home[1], target: null, from: null, hunting: false, seen: 9 });
+      Object.assign(s, { x: 1.5, y: 1.5, a: s.startA, grace: 2 }); Object.assign(s.warden, { x: s.warden.home[0], y: s.warden.home[1], target: null, from: null, hunting: false, seen: 9 });
     }
   }
   const atExit = Math.hypot(s.exit.x - s.x, s.exit.y - s.y) < .46;
@@ -300,15 +301,17 @@ export const STACK = { size: 4, height: .55, perfect: .1, grow: .25, growAfter: 
 export const stackStage = s => Math.min(STAGES.length - 1, Math.floor(s.drops / (DIFFICULTIES[s.difficulty].stackGoal / STAGES.length)));
 export function createStack(difficulty = 'standard') {
   return { ...base('stack', difficulty), blocks: [{ x: 0, z: 0, w: STACK.size, d: STACK.size }], moving: { x: -STACK.range, z: 0, w: STACK.size, d: STACK.size }, direction: 1, axis: 'x',
-    perfect: 0, combo: 0, longestCombo: 0, marks: [], pieces: [], drops: 0, cooldown: 0, stage: 0, gust: 0, sway: 0, mended: 0, last: null, grade: null };
+    perfect: 0, combo: 0, longestCombo: 0, marks: [], pieces: [], drops: 0, cooldown: 0, stage: 0, stageAt: 0, gust: 0, sway: 0, mended: 0, last: null, grade: null };
 }
+// Wind and sway build up over a couple of seconds as their stage begins, rather than arriving at once.
+const settle = s => Math.min(1, Math.max(0, (s.elapsed - s.stageAt) / 2.5));
 // How far the tower's top leans, along both axes, at this moment (zero before Sway).
-function swayAt(s) { return stackStage(s) === 2 ? STACK.sway[s.difficulty] * Math.sin(s.elapsed * 1.15) : 0; }
+function swayAt(s) { return stackStage(s) === 2 ? STACK.sway[s.difficulty] * Math.sin(s.elapsed * 1.15) * (s.stage === 2 ? settle(s) : 0) : 0; }
 export function stepStack(s, input, dt) {
   if (s.phase !== 'playing') return;
   s.elapsed += dt; s.cooldown = Math.max(0, s.cooldown - dt);
   const stage = stackStage(s), t = s.elapsed;
-  s.gust = stage >= 1 ? STACK.gust[s.difficulty] * (Math.sin(t * 1.3) * .6 + Math.sin(t * 2.9 + 1) * .4) : 0;
+  s.gust = stage >= 1 ? STACK.gust[s.difficulty] * (Math.sin(t * 1.3) * .6 + Math.sin(t * 2.9 + 1) * .4) * (stage === 1 && s.stage === 1 ? settle(s) : 1) : 0;
   s.sway = swayAt(s);
   // The slab rides the lean across its lane, so only its timing along the lane matters.
   const across = s.axis === 'x' ? 'z' : 'x'; s.moving[across] = s.blocks.at(-1)[across] + s.sway;
@@ -317,7 +320,20 @@ export function stepStack(s, input, dt) {
     s.moving[s.axis] += dt * s.direction * speed;
     if (Math.abs(s.moving[s.axis] - center) >= STACK.range) { s.moving[s.axis] = center + Math.sign(s.moving[s.axis] - center) * STACK.range; s.direction *= -1; }
   }
-  for (const p of s.pieces) { p.vy -= dt * 8; p.y += p.vy * dt; p.spin += dt * 2; p.life -= dt; }
+  settleStack(s, dt);
+}
+// Offcuts fall, tumbling, until they land on a slab below them or on the roof (6.8 wide), then fade.
+// This also runs after a run ends, so the last pieces finish falling.
+export const ROOF_HALF = 3.4;
+export function settleStack(s, dt) {
+  for (const p of s.pieces) {
+    p.life -= dt;
+    if (p.landed) { p.settle = Math.min(1, (p.settle || 0) + dt * 6); continue; }
+    p.vy -= dt * 8; p.y += p.vy * dt; p.spin += dt * 2;
+    const under = s.blocks.reduce((y, b, i) => Math.abs(b.x - p.x) < (b.w + p.w) / 2 - .02 && Math.abs(b.z - p.z) < (b.d + p.d) / 2 - .02 && (i + 1) * STACK.height <= p.y + STACK.height * .6 ? Math.max(y, (i + 1) * STACK.height) : y,
+      Math.abs(p.x) < ROOF_HALF + p.w / 2 && Math.abs(p.z) < ROOF_HALF + p.d / 2 ? 0 : -Infinity);
+    if (p.y <= under) { p.y = under; p.vy = 0; p.landed = true; p.life = Math.min(p.life, 1.2); }
+  }
   s.pieces = s.pieces.filter(p => p.life > 0);
 }
 export function stackGrade(s) {
@@ -354,7 +370,7 @@ export function dropStack(s) {
     : { type: perfect ? 'perfect' : 'cut', text: perfect ? `Perfect placement · +${points} · ${s.combo} in a row` : `Level ${s.drops} · ${Math.round(kept.w * kept.d / 16 * 100)}% of the starting footprint remains` });
   if (s.drops >= DIFFICULTIES[s.difficulty].stackGoal) { s.phase = 'won'; s.grade = stackGrade(s); return { perfect, kept, grew }; }
   const stage = stackStage(s);
-  if (stage !== s.stage) { s.stage = stage; s.events.push({ type: 'stage-start', text: `Stage ${stage + 1} · ${STAGES[stage].name}. ${STAGES[stage].brief}` }); }
+  if (stage !== s.stage) { s.stage = stage; s.stageAt = s.elapsed; s.events.push({ type: 'stage-start', text: `Stage ${stage + 1} · ${STAGES[stage].name}. ${STAGES[stage].brief}` }); }
   s.axis = s.axis === 'x' ? 'z' : 'x'; s.direction = s.drops % 2 ? -1 : 1; s.sway = swayAt(s);
   const start = { ...kept, x: kept.x + s.sway, z: kept.z + s.sway };
   s.moving = { ...start, [s.axis]: start[s.axis] - s.direction * STACK.range }; s.cooldown = .14;

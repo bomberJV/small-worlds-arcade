@@ -97,13 +97,24 @@ function requestFrame() { if (!frameId && visible && !document.hidden) frameId =
 new ResizeObserver(requestFrame).observe(canvas);
 new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; if (!visible) pause('Paused while the game is out of view.'); else requestFrame(); }, { threshold: .03 }).observe(canvas);
 const mapKey = key => ({ a: 'ArrowLeft', d: 'ArrowRight', w: 'ArrowUp', s: 'ArrowDown' })[key.toLowerCase()] || key;
-canvas.addEventListener('keydown', event => {
+// While a run is on, steering keys reach the game wherever focus is. A click on a game
+// button used to hand the arrow keys back to the page, which scrolled it up and down.
+const formField = target => target.closest?.('input, select, textarea, [contenteditable]');
+const interactive = target => target.closest?.('button, a, summary, input, select, textarea, [contenteditable]');
+function gameKey(event, key) {
+  if (event.target === canvas) return true;
+  if (state.phase !== 'playing' || event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (key.startsWith('Arrow')) return !formField(event.target);
+  return key === ' ' && !interactive(event.target);
+}
+document.addEventListener('keydown', event => {
   const key = mapKey(event.key);
+  if (!gameKey(event, key)) return;
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Escape', 'p', 'P'].includes(key)) event.preventDefault();
   if (key === ' ') { if (!event.repeat) act(); }
   else if (key.startsWith('Arrow')) { aim = null; keys.add(key); }
 });
-canvas.addEventListener('keyup', event => keys.delete(mapKey(event.key)));
+document.addEventListener('keyup', event => keys.delete(mapKey(event.key)));
 $('#game-area').addEventListener('keydown', event => {
   if (event.key === 'Escape' || (event.key.toLowerCase() === 'p' && event.target.tagName !== 'SELECT')) {
     event.preventDefault(); if (!event.repeat) togglePause();
@@ -153,3 +164,21 @@ function playSound(kind) {
   notes.forEach((frequency, i) => { const at = audioContext.currentTime + i * .075, oscillator = audioContext.createOscillator(), gain = audioContext.createGain(); oscillator.type = 'sine'; oscillator.frequency.value = frequency; gain.gain.setValueAtTime(0, at); gain.gain.linearRampToValueAtTime(.035, at + .008); gain.gain.exponentialRampToValueAtTime(.0001, at + .18); oscillator.connect(gain); gain.connect(audioContext.destination); oscillator.start(at); oscillator.stop(at + .2); oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); }; });
 }
 configure(); requestFrame();
+// Full screen: the game column fills the screen. The Fullscreen API is used where the browser
+// has it; elsewhere (iPhone Safari) the column becomes a fixed overlay.
+const gameColumn = $('.game-column'), expandButton = $('#expand-game');
+function setExpanded(on) {
+  gameColumn.classList.toggle('expanded', on); document.documentElement.classList.toggle('game-expanded', on);
+  expandButton.setAttribute('aria-pressed', on); expandButton.textContent = on ? 'Exit full screen' : 'Full screen';
+  canvas.focus({ preventScroll: true }); requestFrame();
+}
+expandButton.addEventListener('click', async () => {
+  if (!gameColumn.classList.contains('expanded')) {
+    setExpanded(true);
+    try { if (gameColumn.requestFullscreen && !document.fullscreenElement) await gameColumn.requestFullscreen({ navigationUI: 'hide' }); } catch { /* The overlay alone still fills the window. */ }
+  } else {
+    if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch { /* Already out. */ } }
+    setExpanded(false);
+  }
+});
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && gameColumn.classList.contains('expanded')) setExpanded(false); });

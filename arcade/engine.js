@@ -139,15 +139,34 @@ export function mazeDistances(grid, from) {
   }
   return seen;
 }
-export function createMaze(difficulty = 'standard', seed = 73) {
-  const random = randomSeed(seed), width = difficulty === 'relaxed' ? 13 : 17, height = 13;
+// ---- The Green Room ----------------------------------------------------------------------
+// Three floors, each with its own rule. The Green Room is lit: learn the halls. The Dark is lit
+// only by your lantern and the crystals' own glow. The Warden has someone walking the halls;
+// if it reaches you, you lose a spark and start the floor again. Three crystals open each exit.
+export const FLOORS = [
+  { name: 'The Green Room', brief: 'Three crystals open the exit. Take your time.', size: { relaxed: [13, 11], standard: [15, 13] }, lantern: 9, loops: 0 },
+  { name: 'The Dark', brief: 'Only your lantern and the crystals give light.', size: { relaxed: [13, 13], standard: [17, 13] }, lantern: { relaxed: 5.4, standard: 4.4 }, loops: .06 },
+  { name: 'The Warden', brief: 'Something walks these halls. Keep moving.', size: { relaxed: [15, 13], standard: [19, 15] }, lantern: { relaxed: 6, standard: 5 }, loops: .12, warden: { relaxed: 1, standard: 1.3 } },
+];
+export const SPRINT = { speed: 1.55, drain: .35, regain: .22, winded: .35 }, WALK = 2.25, SPARKS = 3;
+function carve(width, height, random, loops) {
   const grid = Array.from({ length: height }, () => Array(width).fill('1')), stack = [[1, 1]]; grid[1][1] = '0';
   while (stack.length) {
     const [x, y] = stack.at(-1), options = [[2, 0], [-2, 0], [0, 2], [0, -2]].filter(([dx, dy]) => x + dx > 0 && y + dy > 0 && x + dx < width - 1 && y + dy < height - 1 && grid[y + dy][x + dx] === '1');
     if (!options.length) { stack.pop(); continue; }
     const [dx, dy] = options[Math.floor(random() * options.length)]; grid[y + dy / 2][x + dx / 2] = '0'; grid[y + dy][x + dx] = '0'; stack.push([x + dx, y + dy]);
   }
-  const rows = grid.map(row => row.join('')), distances = mazeDistances(rows, [1, 1]);
+  // Knock through some inner walls between two halls, so later floors have loops to escape along.
+  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) {
+    if (grid[y][x] !== '1' || random() >= loops) continue;
+    if ((grid[y][x - 1] === '0' && grid[y][x + 1] === '0' && grid[y - 1][x] === '1' && grid[y + 1][x] === '1') ||
+        (grid[y - 1][x] === '0' && grid[y + 1][x] === '0' && grid[y][x - 1] === '1' && grid[y][x + 1] === '1')) grid[y][x] = '0';
+  }
+  return grid.map(row => row.join(''));
+}
+function buildFloor(s, index) {
+  const spec = FLOORS[index], [width, height] = spec.size[s.difficulty], random = randomSeed(s.seed * 7 + index * 7919 + 13);
+  const rows = carve(width, height, random, spec.loops), distances = mazeDistances(rows, [1, 1]);
   const cells = [...distances].map(([key, d]) => ({ cell: key.split(',').map(Number), d })).sort((a, b) => b.d - a.d);
   const exitCell = cells[0].cell, targets = [];
   for (const { cell, d } of cells) {
@@ -161,24 +180,91 @@ export function createMaze(difficulty = 'standard', seed = 73) {
     if (targets.length === 3) break;
     if (d > 3 && (cell[0] !== exitCell[0] || cell[1] !== exitCell[1]) && targets.every(t => t[0] !== cell[0] || t[1] !== cell[1])) targets.push(cell);
   }
-  return { ...base('maze', difficulty), seed, x: 1.5, y: 1.5, a: rows[1][2] === '0' ? 0 : Math.PI / 2, grid: rows,
-    gems: targets.map(([x, y]) => ({ x: x + .5, y: y + .5, got: false })), exit: { x: exitCell[0] + .5, y: exitCell[1] + .5 }, collected: 0, visited: new Set(['1,1']), trail: [[1.5, 1.5]], reveal: difficulty === 'relaxed', steps: 0, lockNotice: false };
+  const lantern = typeof spec.lantern === 'number' ? spec.lantern : spec.lantern[s.difficulty];
+  let warden = null;
+  if (spec.warden) {
+    // The warden starts far from you, at a crossing, away from the crystals and the exit.
+    const far = cells.find(({ cell, d }) => d <= cells[0].d * .7 && d >= cells[0].d * .45 &&
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => rows[cell[1] + dy][cell[0] + dx] === '0').length >= 3 &&
+      [...targets, exitCell].every(t => Math.hypot(t[0] - cell[0], t[1] - cell[1]) >= 2)) ?? cells[Math.floor(cells.length / 3)];
+    warden = { x: far.cell[0] + .5, y: far.cell[1] + .5, home: [far.cell[0] + .5, far.cell[1] + .5], target: null, from: null, speed: spec.warden[s.difficulty], hunting: false, seen: 0 };
+  }
+  Object.assign(s, { floor: index, floorAt: s.elapsed, grid: rows, x: 1.5, y: 1.5, a: rows[1][2] === '0' ? 0 : Math.PI / 2,
+    gems: targets.map(([x, y]) => ({ x: x + .5, y: y + .5, got: false })), exit: { x: exitCell[0] + .5, y: exitCell[1] + .5 }, collected: 0,
+    visited: new Set(['1,1']), trail: [[1.5, 1.5]], lockNotice: false, lantern, warden, grace: 0, door: 0 });
+}
+export function createMaze(difficulty = 'standard', seed = 73) {
+  const s = { ...base('maze', difficulty), seed, reveal: difficulty === 'relaxed', steps: 0, crystals: 0, sparks: SPARKS, stamina: 1, sprinting: false, winded: false, caught: 0, rand: (seed * 2654435761) >>> 0, splits: [] };
+  buildFloor(s, 0);
+  return s;
 }
 export function walkable(grid, x, y, radius = .18) {
   return [[-radius, -radius], [radius, -radius], [-radius, radius], [radius, radius]].every(([dx, dy]) => grid[Math.floor(y + dy)]?.[Math.floor(x + dx)] === '0');
 }
+const nextRandom = s => ((s.rand = (Math.imul(s.rand, 1664525) + 1013904223) >>> 0) / 4294967296);
+// Whether a straight line between two points stays inside the halls.
+export function inSight(grid, ax, ay, bx, by) {
+  const distance = Math.hypot(bx - ax, by - ay); if (distance < .001) return true;
+  return castRay(grid, ax, ay, (bx - ax) / distance, (by - ay) / distance, distance + .01).distance >= distance - .01;
+}
+function stepWarden(s, dt) {
+  const w = s.warden, speed = w.speed * dt;
+  const distance = Math.hypot(s.x - w.x, s.y - w.y), sees = distance < 6.5 && inSight(s.grid, w.x, w.y, s.x, s.y);
+  if (sees && !w.hunting) s.events.push({ type: 'seen', text: 'The warden has seen you.' });
+  w.hunting = sees || (w.hunting && w.seen < 2.5); w.seen = sees ? 0 : w.seen + dt;
+  if (!w.target || Math.hypot(w.target[0] - w.x, w.target[1] - w.y) < .04) {
+    if (w.target) { w.x = w.target[0]; w.y = w.target[1]; }
+    const here = [Math.floor(w.x), Math.floor(w.y)], open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => s.grid[here[1] + dy][here[0] + dx] === '0');
+    let step;
+    if (w.hunting) {
+      // Toward you along the halls: the first step of the shortest way.
+      const paths = mazeDistances(s.grid, [Math.floor(s.x), Math.floor(s.y)]);
+      step = open.reduce((best, d) => { const v = paths.get(`${here[0] + d[0]},${here[1] + d[1]}`) ?? 1e9; return v < best.v ? { d, v } : best; }, { d: open[0], v: 1e9 }).d;
+    } else {
+      // Wandering: on at a straight, a fresh choice at a crossing, back only at a dead end.
+      const back = w.from ? [-w.from[0], -w.from[1]] : null, forward = open.filter(d => !back || d[0] !== back[0] || d[1] !== back[1]);
+      const choices = forward.length ? forward : open;
+      step = choices[Math.floor(nextRandom(s) * choices.length)];
+    }
+    w.from = step; w.target = [here[0] + step[0] + .5, here[1] + step[1] + .5];
+  }
+  const dx = w.target[0] - w.x, dy = w.target[1] - w.y, length = Math.hypot(dx, dy), move = Math.min(length, speed * (w.hunting ? 1.15 : 1));
+  if (length > 0) { w.x += dx / length * move; w.y += dy / length * move; }
+}
 export function stepMaze(s, input, dt) {
   if (s.phase !== 'playing') return;
   s.elapsed += dt; s.a += (input.x || 0) * dt * 1.8;
-  const distance = (input.y || 0) * dt * 2.25, x = s.x + Math.cos(s.a) * distance, y = s.y + Math.sin(s.a) * distance;
+  s.grace = Math.max(0, s.grace - dt);
+  const moving = Boolean(input.y);
+  // Run yourself out and you are winded until a third of your breath comes back.
+  s.sprinting = Boolean(input.sprint) && moving && !s.winded;
+  s.stamina = s.sprinting ? Math.max(0, s.stamina - SPRINT.drain * dt) : Math.min(1, s.stamina + SPRINT.regain * dt);
+  if (s.stamina === 0) s.winded = true; else if (s.stamina >= SPRINT.winded) s.winded = false;
+  const distance = (input.y || 0) * dt * WALK * (s.sprinting ? SPRINT.speed : 1), x = s.x + Math.cos(s.a) * distance, y = s.y + Math.sin(s.a) * distance;
   if (walkable(s.grid, x, s.y)) s.x = x;
   if (walkable(s.grid, s.x, y)) s.y = y;
   const tile = `${Math.floor(s.x)},${Math.floor(s.y)}`;
   if (!s.visited.has(tile)) { s.visited.add(tile); s.steps++; }
   if (Math.hypot(s.x - s.trail.at(-1)[0], s.y - s.trail.at(-1)[1]) > .3) { s.trail.push([s.x, s.y]); if (s.trail.length > 900) s.trail.shift(); }
-  s.gems.forEach(gem => { if (!gem.got && Math.hypot(gem.x - s.x, gem.y - s.y) < .43) { gem.got = true; s.collected++; s.score = s.collected; s.events.push({ type: 'gem', text: s.collected === s.gems.length ? 'All crystals found. The exit is open.' : `Crystal ${s.collected} of ${s.gems.length}. Keep exploring.` }); } });
+  s.gems.forEach(gem => { if (!gem.got && Math.hypot(gem.x - s.x, gem.y - s.y) < .43) { gem.got = true; s.collected++; s.crystals++; s.score = s.crystals; s.events.push({ type: 'gem', text: s.collected === s.gems.length ? 'All three crystals. The exit is open.' : `Crystal ${s.collected} of ${s.gems.length}. Keep exploring.` }); } });
+  if (s.collected === s.gems.length) s.door = Math.min(1, s.door + dt * 1.2);
+  if (s.warden) {
+    stepWarden(s, dt);
+    if (!s.grace && Math.hypot(s.warden.x - s.x, s.warden.y - s.y) < .55) {
+      s.sparks--; s.caught++;
+      if (s.sparks <= 0) { s.phase = 'lost'; s.events.push({ type: 'caught', text: 'The warden caught you. No sparks left.' }); return; }
+      s.events.push({ type: 'caught', text: `The warden caught you. ${s.sparks} ${s.sparks === 1 ? 'spark' : 'sparks'} left; back to the stairs.` });
+      // Back to the start of the floor; crystals already found stay found.
+      Object.assign(s, { x: 1.5, y: 1.5, grace: 2 }); Object.assign(s.warden, { x: s.warden.home[0], y: s.warden.home[1], target: null, from: null, hunting: false, seen: 9 });
+    }
+  }
   const atExit = Math.hypot(s.exit.x - s.x, s.exit.y - s.y) < .46;
-  if (atExit && s.collected === s.gems.length) s.phase = 'won';
+  if (atExit && s.collected === s.gems.length) {
+    s.splits.push(Math.round(s.elapsed * 10) / 10);
+    if (s.floor === FLOORS.length - 1) { s.phase = 'won'; return; }
+    buildFloor(s, s.floor + 1);
+    s.events.push({ type: 'floor', text: `Floor ${s.floor + 1} · ${FLOORS[s.floor].name}. ${FLOORS[s.floor].brief}` });
+  }
   else if (atExit && !s.lockNotice) { s.lockNotice = true; s.events.push({ type: 'locked', text: `Exit locked: find ${s.gems.length - s.collected} more crystals.` }); }
   else if (!atExit) s.lockNotice = false;
 }
@@ -238,14 +324,15 @@ export function validateRecords(raw) {
   const result = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
   for (const [key, value] of Object.entries(raw).slice(0, 100)) {
-    if (!/^(flight|flight-v2|stack):(relaxed|standard)$|^maze:(relaxed|standard):\d{1,6}$/.test(key)) continue;
+    if (!/^(flight|flight-v2|stack):(relaxed|standard)$|^maze(-v2)?:(relaxed|standard):\d{1,6}$/.test(key)) continue;
     if (!Number.isFinite(value) || value < 0 || value > 1000000) continue;
     result[key] = value;
   }
   return result;
 }
 // Ring Runner's three-sector course scores differently from the first course, so its bests start afresh.
-export function recordKey(s) { return `${s.mode === 'flight' ? 'flight-v2' : s.mode}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
+// The Green Room's three floors take longer than its first single floor, so its times start afresh too.
+export function recordKey(s) { return `${s.mode === 'flight' ? 'flight-v2' : s.mode === 'maze' ? 'maze-v2' : s.mode}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
 export function updateRecord(records, s) {
   if (!['won', 'lost'].includes(s.phase)) return false;
   const key = recordKey(s);

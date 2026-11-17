@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, createStack, dropStack, stepStack, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
+import { DIFFICULTIES, SECTORS, BOOST, createFlight, evaluateRing, stepFlight, ringAt, flightPar, createMaze, mazeDistances, walkable, stepMaze, castRay, FLOORS, SPRINT, WALK, inSight, createStack, dropStack, stepStack, validateRecords, updateRecord, recordKey } from '../arcade/engine.js';
 
 test('flight course is completable by ordinary steering at both paces', () => {
   for (const difficulty of Object.keys(DIFFICULTIES)) {
@@ -97,12 +97,66 @@ test('maze seeds are reproducible but different layouts really differ', () => {
   assert.deepEqual(createMaze('standard', 73).grid, createMaze('standard', 73).grid);
   assert.notDeepEqual(createMaze('standard', 73).grid, createMaze('standard', 74).grid);
 });
-test('maze exit stays locked until every crystal is collected once', () => {
+const clearFloor = s => { for (const gem of s.gems) { s.x = gem.x; s.y = gem.y; stepMaze(s, {}, .01); } s.x = s.exit.x; s.y = s.exit.y; stepMaze(s, {}, .01); };
+test('maze exit stays locked until every crystal is collected once, then leads down a floor', () => {
   const s = createMaze(); s.phase = 'playing'; s.x = s.exit.x; s.y = s.exit.y; stepMaze(s, {}, .01);
   assert.equal(s.phase, 'playing'); assert.equal(s.events.at(-1).type, 'locked');
   for (const gem of s.gems) { s.x = gem.x; s.y = gem.y; stepMaze(s, {}, .01); stepMaze(s, {}, .01); }
   assert.equal(s.collected, 3); assert.equal(s.score, 3);
-  s.x = s.exit.x; s.y = s.exit.y; stepMaze(s, {}, .01); assert.equal(s.phase, 'won');
+  s.x = s.exit.x; s.y = s.exit.y; stepMaze(s, {}, .01);
+  assert.equal(s.phase, 'playing'); assert.equal(s.floor, 1); assert.equal(s.collected, 0); assert.equal(s.x, 1.5); assert.equal(s.events.at(-1).type, 'floor');
+});
+test('three floors: the dark narrows the lantern, the warden only walks the last floor, and the run ends on floor three', () => {
+  for (const difficulty of Object.keys(DIFFICULTIES)) {
+    const s = createMaze(difficulty, 11); s.phase = 'playing';
+    assert.equal(s.floor, 0); assert.equal(s.warden, null); const lit = s.lantern;
+    clearFloor(s); assert.equal(s.floor, 1); assert.ok(s.lantern < lit); assert.equal(s.warden, null);
+    clearFloor(s); assert.equal(s.floor, 2); assert.ok(s.warden);
+    s.warden.speed = 0;
+    clearFloor(s); assert.equal(s.phase, 'won'); assert.equal(s.crystals, 9); assert.equal(s.splits.length, 3);
+    assert.ok(s.splits.every((t, i) => !i || t >= s.splits[i - 1]));
+  }
+  assert.ok(FLOORS[1].lantern.standard < FLOORS[1].lantern.relaxed);
+});
+test('every floor of 300 mazes at both paces is solvable and the warden starts well away from you', () => {
+  for (const difficulty of Object.keys(DIFFICULTIES)) for (let seed = 1; seed <= 300; seed++) {
+    const s = createMaze(difficulty, seed); s.phase = 'playing';
+    for (let floor = 0; floor < FLOORS.length; floor++) {
+      if (floor) clearFloor(s);
+      const distances = mazeDistances(s.grid, [1, 1]), keys = [...s.gems, s.exit].map(p => `${Math.floor(p.x)},${Math.floor(p.y)}`);
+      assert.equal(new Set(keys).size, 4, `${difficulty} ${seed} floor ${floor}`); keys.forEach(k => assert.ok(distances.has(k)));
+      if (s.warden) assert.ok(distances.get(`${Math.floor(s.warden.x)},${Math.floor(s.warden.y)}`) >= 6);
+    }
+  }
+});
+test('the warden hunts you when it sees you, costs a spark, sends you back, and three catches end the run', () => {
+  const s = createMaze('standard', 5); s.phase = 'playing'; clearFloor(s); clearFloor(s);
+  assert.equal(s.floor, 2); s.gems[0].got = true; s.collected = 1;
+  // Put the warden in plain sight down the first hall.
+  const run = [...s.grid[1]].findIndex((c, x) => x > 1 && c === '1');
+  s.warden.x = Math.min(run - .5, 3.5); s.warden.y = 1.5; s.warden.target = null; s.x = 1.5; s.y = 1.5;
+  stepMaze(s, {}, .01); assert.equal(s.warden.hunting, true); assert.ok(s.events.some(e => e.type === 'seen'));
+  for (let i = 0; i < 400 && s.sparks === 3; i++) stepMaze(s, {}, 1 / 60);
+  assert.equal(s.sparks, 2); assert.equal(s.caught, 1); assert.equal(s.x, 1.5); assert.equal(s.collected, 1); assert.ok(s.grace > 0);
+  // Grace: the warden cannot catch you twice in the same moment.
+  s.warden.x = s.x; s.warden.y = s.y; stepMaze(s, {}, .01); assert.equal(s.sparks, 2);
+  s.grace = 0; stepMaze(s, {}, .01); assert.equal(s.sparks, 1);
+  s.grace = 0; s.warden.x = s.x; s.warden.y = s.y; stepMaze(s, {}, .01); assert.equal(s.sparks, 0); assert.equal(s.phase, 'lost');
+});
+test('sprint is faster, drains stamina, and only recovers when you ease off', () => {
+  const grid = ['1111111111111111111111', '1000000000000000000001', '1111111111111111111111'];
+  const walk = createMaze(), run = createMaze();
+  for (const s of [walk, run]) Object.assign(s, { grid, x: 1.5, y: 1.5, a: 0, phase: 'playing', warden: null });
+  for (let i = 0; i < 60; i++) { stepMaze(walk, { y: 1 }, 1 / 60); stepMaze(run, { y: 1, sprint: true }, 1 / 60); }
+  assert.ok(Math.abs((run.x - 1.5) / (walk.x - 1.5) - SPRINT.speed) < .01); assert.ok(run.stamina < 1); assert.equal(walk.stamina, 1);
+  for (let i = 0; i < 600; i++) stepMaze(run, { y: 1, sprint: true }, 1 / 60);
+  assert.equal(run.winded, true); assert.equal(run.sprinting, false); assert.ok(run.stamina < SPRINT.winded);
+  run.x = 1.5; const x = run.x; stepMaze(run, { y: 1, sprint: true }, 1 / 60); assert.ok(Math.abs(run.x - x - WALK / 60) < 1e-9);
+  for (let i = 0; i < 120; i++) stepMaze(run, { y: 1 }, 1 / 60); assert.equal(run.winded, false);
+});
+test('a straight hall is in sight and a wall blocks it', () => {
+  const grid = ['11111', '10001', '11101', '10001', '11111'];
+  assert.equal(inSight(grid, 1.5, 1.5, 3.5, 1.5), true); assert.equal(inSight(grid, 1.5, 1.5, 1.5, 3.5), false);
 });
 test('wall collisions retain player clearance and DDA rays hit exact boundaries', () => {
   const grid = ['11111', '10001', '10001', '10001', '11111'];
@@ -131,8 +185,8 @@ test('tower input cooldown rejects accidental double taps', () => {
   assert.equal(dropStack(s), null); assert.equal(s.score, score); stepStack(s, {}, .2); assert.equal(s.cooldown, 0);
 });
 test('records reject malformed storage and use fastest completed maze run per seed', () => {
-  const result = validateRecords({ 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
-  assert.deepEqual(result, { 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'maze:standard:73': 52.1 });
+  const result = validateRecords({ 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'stack:relaxed': -1, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5, 'bad:key': 6, 'flight:relaxed': '<img>', 'stack:standard': Infinity });
+  assert.deepEqual(result, { 'flight:standard': 1200, 'flight-v2:relaxed': 3100, 'maze:standard:73': 52.1, 'maze-v2:relaxed:9': 140.5 });
   assert.equal(recordKey(createFlight('relaxed')), 'flight-v2:relaxed');
   assert.deepEqual(validateRecords(['bad']), {}); assert.deepEqual(validateRecords(null), {});
   const s = createMaze(); s.phase = 'won'; s.elapsed = 45.4; assert.equal(updateRecord(result, s), true); assert.equal(result[recordKey(s)], 45.4);

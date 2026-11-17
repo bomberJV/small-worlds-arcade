@@ -1,49 +1,7 @@
 import { clamp, castRay, DIFFICULTIES } from './engine.js';
+import { flightScene } from './flight3d.js';
 const TAU = Math.PI * 2;
 function polygon(ctx, points, fill, stroke) { ctx.beginPath(); points.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.closePath(); if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); } }
-function flight(ctx, w, h, s) {
-  const f = Math.min(w, h) * 1.05, project = (x, y, z) => [w / 2 + (x - s.x) * f / z, h / 2 - (y - s.y) * f / z];
-  ctx.fillStyle = '#070d15'; ctx.fillRect(0, 0, w, h);
-  const nebula = ctx.createRadialGradient(w * .7 - s.x * 2, h * .26 + s.y * 2, 0, w * .7, h * .26, w * .7);
-  nebula.addColorStop(0, '#35516870'); nebula.addColorStop(.45, '#29374a25'); nebula.addColorStop(1, '#07101900'); ctx.fillStyle = nebula; ctx.fillRect(0, 0, w, h);
-  // Distant planet: a destination, never a collision obstacle.
-  const px = w * .78 - s.x * 4, py = h * .2 + s.y * 4, pr = Math.min(w, h) * .15;
-  ctx.fillStyle = '#233c40'; ctx.beginPath(); ctx.arc(px, py, pr, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#0c1921'; ctx.beginPath(); ctx.ellipse(px + pr * .35, py, pr * .82, pr, -.22, 0, TAU); ctx.fill();
-  ctx.strokeStyle = '#90bb9c30'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(px, py, pr * 1.8, pr * .25, -.3, 0, TAU); ctx.stroke();
-  for (const p of s.stars) {
-    const z = ((p.z - s.z) % 280 + 280) % 280 + 1, [x, y] = project(p.x, p.y, z), radius = clamp(f / z * .03, .5, 1.5);
-    if (x < -10 || x > w + 10 || y < -10 || y > h + 10) continue;
-    ctx.fillStyle = `rgba(196,219,214,${clamp(.2 + 30 / z, .2, .8)})`; ctx.beginPath(); ctx.arc(x, y, radius, 0, TAU); ctx.fill();
-    if (z < 22 && s.phase === 'playing') { ctx.strokeStyle = '#b8d4d143'; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (x - w / 2) * .018, y + (y - h / 2) * .018); ctx.stroke(); }
-  }
-  const next = s.rings.find(r => !r.result);
-  for (const ring of [...s.rings].reverse()) {
-    const z = ring.z - s.z; if (z <= .3 || z > 165) continue;
-    const [x, y] = project(ring.x, ring.y, z), radius = ring.radius * f / z, nextRing = ring === next;
-    ctx.strokeStyle = nextRing ? '#d9f57e' : '#8ab3a37a'; ctx.lineWidth = clamp(f / z * .09, 1, 7);
-    ctx.beginPath(); ctx.arc(x, y, radius, 0, TAU); ctx.stroke();
-    if (nextRing) {
-      ctx.strokeStyle = '#d9f57e33'; ctx.lineWidth = clamp(f / z * .32, 3, 20); ctx.beginPath(); ctx.arc(x, y, radius, 0, TAU); ctx.stroke();
-      ctx.lineWidth = 1; ctx.strokeStyle = '#d9f57e60';
-      for (let i = 0; i < 8; i++) { const angle = i / 8 * TAU + .2; ctx.beginPath(); ctx.moveTo(x + Math.cos(angle) * radius * 1.1, y + Math.sin(angle) * radius * 1.1); ctx.lineTo(x + Math.cos(angle) * radius * 1.18, y + Math.sin(angle) * radius * 1.18); ctx.stroke(); }
-      if (z < 85) { ctx.fillStyle = '#e7ecc7'; ctx.font = '9px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.fillText(String(s.passed + 1).padStart(2, '0'), x, y - radius - 11); ctx.textAlign = 'left'; }
-      if (radius < Math.min(w, h) * .5) { ctx.fillStyle = '#e9f0d6'; ctx.beginPath(); ctx.arc(x, y, 2, 0, TAU); ctx.fill(); }
-    }
-  }
-  const reticle = '#e5edcc99'; ctx.strokeStyle = reticle; ctx.lineWidth = 1;
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { ctx.beginPath(); ctx.moveTo(w / 2 + dx * 8, h / 2 + dy * 8); ctx.lineTo(w / 2 + dx * 17, h / 2 + dy * 17); ctx.stroke(); }
-  ctx.strokeStyle = '#b6d7a533'; ctx.beginPath(); ctx.arc(w / 2, h / 2, 26, 0, TAU); ctx.stroke();
-  // The small target tracker remains useful when a ring moves outside the screen.
-  if (next) {
-    const dx = next.x - s.x, dy = next.y - s.y, radius = 24, cx = w - 43, cy = h - 54;
-    ctx.fillStyle = '#07100dbb'; ctx.beginPath(); ctx.arc(cx, cy, radius + 5, 0, TAU); ctx.fill(); ctx.strokeStyle = '#6b8b7166'; ctx.beginPath(); ctx.arc(cx, cy, radius, 0, TAU); ctx.stroke();
-    ctx.fillStyle = '#d9f57e'; ctx.beginPath(); ctx.arc(cx + clamp(dx / 6, -1, 1) * radius, cy - clamp(dy / 4, -1, 1) * radius, 3, 0, TAU); ctx.fill(); ctx.fillStyle = '#ffffff88'; ctx.fillRect(cx - 1, cy - 1, 2, 2);
-  }
-  polygon(ctx, [[0, h], [w * .11, h * .89], [w * .32, h * .93], [w * .39, h], [w * .61, h], [w * .68, h * .93], [w * .89, h * .89], [w, h]], '#1b2c355c', '#94b7a62a');
-  const progress = s.passed / s.rings.length; ctx.fillStyle = '#48665366'; ctx.fillRect(w * .35, h - 19, w * .3, 2); ctx.fillStyle = '#d9f57e'; ctx.fillRect(w * .35, h - 19, w * .3 * progress, 2);
-  if (s.flash > 0) { ctx.fillStyle = `rgba(185,70,103,${s.flash * .11})`; ctx.fillRect(0, 0, w, h); }
-}
 function maze(ctx, w, h, s) {
   const ceiling = ctx.createLinearGradient(0, 0, 0, h / 2); ceiling.addColorStop(0, '#152423'); ceiling.addColorStop(1, '#080e0b'); ctx.fillStyle = ceiling; ctx.fillRect(0, 0, w, h / 2);
   const floor = ctx.createLinearGradient(0, h / 2, 0, h); floor.addColorStop(0, '#12180e'); floor.addColorStop(1, '#4c5e35'); ctx.fillStyle = floor; ctx.fillRect(0, h / 2, w, h / 2);
@@ -117,10 +75,11 @@ function tower(ctx, w, h, s) {
   const goal = DIFFICULTIES[s.difficulty].stackGoal, x = 18, y = h - 55;
   for (let i = 0; i < goal; i++) { ctx.fillStyle = i < s.drops ? '#d9f57e' : '#d8e4af30'; ctx.fillRect(x + i * Math.min(9, (w - 45) / goal), y, 5, 12); }
 }
-export function renderGame(ctx, width, height, state) {
+// `options`: { now, reduced } for Ring Runner's camera and lights.
+export function renderGame(ctx, width, height, state, options = {}) {
   if (!width || !height) return;
   ctx.save(); ctx.lineWidth = 1; ctx.textAlign = 'left'; ctx.globalAlpha = 1;
-  if (state.mode === 'flight') flight(ctx, width, height, state);
+  if (state.mode === 'flight') flightScene(ctx, width, height, state, options);
   else if (state.mode === 'maze') maze(ctx, width, height, state);
   else tower(ctx, width, height, state);
   ctx.restore();

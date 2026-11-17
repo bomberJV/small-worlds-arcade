@@ -1,49 +1,131 @@
 // Pure rules for the three cartridges. No DOM, audio, storage or rendering.
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const DIFFICULTIES = {
-  relaxed: { flightSpeed: 9, ringRadius: 1.7, flightCount: 15, stackSpeed: 2.2, stackGoal: 12, label: 'Easygoing' },
-  standard: { flightSpeed: 12, ringRadius: 1.35, flightCount: 18, stackSpeed: 2.8, stackGoal: 18, label: 'One more try' },
+  relaxed: { flightSpeed: 9, ringRadius: 1.7, ringsPerSector: 6, rocks: 4, drift: .6, pulse: .2, stackSpeed: 2.2, stackGoal: 12, label: 'Easygoing' },
+  standard: { flightSpeed: 12, ringRadius: 1.35, ringsPerSector: 8, rocks: 7, drift: 1, pulse: .28, stackSpeed: 2.8, stackGoal: 18, label: 'One more try' },
 };
 export function randomSeed(seed) { let value = seed >>> 0; return () => ((value = (Math.imul(value, 1664525) + 1013904223) >>> 0) / 4294967296); }
 const base = (mode, difficulty) => ({ mode, difficulty, phase: 'ready', elapsed: 0, score: 0, events: [] });
+
+// ---- Ring Runner -------------------------------------------------------------------------
+// Three sectors, each with its own rule. Low orbit teaches the line. In the debris field the
+// rings drift and rocks cross the lane. In the nebula the rings breathe, shrinking and opening.
+// A shield cell waits off the line in the last two sectors. Boost (held) flies faster and
+// scores half as much again per ring; dead-center passes refill it.
+export const SECTORS = [
+  { name: 'Low orbit', brief: 'Find the line. Aim for the center of each ring.' },
+  { name: 'Debris field', brief: 'The rings drift and rocks cross the lane. A rock costs a shield.' },
+  { name: 'Nebula', brief: 'The rings breathe. Go through while they are open.' },
+];
+export const SHIP_RADIUS = .35, BOOST = { speed: 1.45, points: 1.5, drain: .32, perfect: .25, hit: .1 };
+const SECTOR_GAP = 20, RING_GAP = 25;
+// Where a ring is, and how wide, at a moment of the run. Drift and breathing follow the run's clock.
+export function ringAt(ring, t) {
+  const d = ring.drift, b = ring.pulse;
+  return {
+    x: ring.x + (d ? d.ax * Math.sin(d.w * t + d.phase) : 0), y: ring.y + (d ? d.ay * Math.sin(d.w * .8 * t + d.phase * 1.7) : 0),
+    radius: ring.radius * (b ? 1 - b.amount * (.5 + .5 * Math.sin(b.w * t + b.phase)) : 1),
+  };
+}
 export function createFlight(difficulty = 'standard', seed = 73) {
-  const config = DIFFICULTIES[difficulty], random = randomSeed(seed);
-  const rings = Array.from({ length: config.flightCount }, (_, i) => {
-    const section = Math.floor(i / 6), angle = i * .7 + section * .6;
-    return { x: i < 2 ? 0 : Math.sin(angle) * (2.1 + section * .55), y: i < 2 ? 0 : Math.cos(angle * .86) * 1.9, z: 24 + i * 25, radius: config.ringRadius, result: null };
-  });
-  return { ...base('flight', difficulty), x: 0, y: 0, vx: 0, vy: 0, z: 0, shields: 3, passed: 0, combo: 0, longestCombo: 0, perfect: 0, rings,
+  const config = DIFFICULTIES[difficulty], random = randomSeed(seed), n = config.ringsPerSector, rings = [], rocks = [], cells = [];
+  for (let k = 0; k < SECTORS.length; k++) for (let i = 0; i < n; i++) {
+    const g = k * n + i, angle = g * .7 + k * .6, first = g < 2;
+    rings.push({ x: first ? 0 : Math.sin(angle) * (2.1 + k * .55), y: first ? 0 : Math.cos(angle * .86) * 1.9, z: 24 + g * RING_GAP + k * SECTOR_GAP,
+      radius: config.ringRadius, sector: k, index: g, result: null, at: null,
+      drift: k === 1 ? { ax: config.drift * (.75 + .25 * Math.sin(g)), ay: config.drift * .55, w: .9 + .15 * (g % 3), phase: g * 1.3 } : null,
+      pulse: k === 2 ? { amount: config.pulse, w: 2.1 + .2 * (g % 2), phase: g * .9 } : null });
+  }
+  // Rocks sit between rings of the debris field, well off the line between them.
+  const field = rings.filter(r => r.sector === 1);
+  for (let j = 0; j < config.rocks; j++) {
+    const a = field[j % (field.length - 1)], b = field[j % (field.length - 1) + 1], t = .35 + .3 * random(), heading = random() * Math.PI * 2;
+    const r = .45 + .45 * random(), reach = config.drift + r + SHIP_RADIUS + 1.35 + random() * 1.2;
+    rocks.push({ x: a.x + (b.x - a.x) * t + Math.cos(heading) * reach, y: a.y + (b.y - a.y) * t + Math.sin(heading) * reach, z: a.z + (b.z - a.z) * t,
+      r, spin: .3 + random() * .8, shape: Math.floor(random() * 1e6), hit: false });
+  }
+  // One shield cell in each of the last two sectors: a short detour from the line.
+  for (const k of [1, 2]) {
+    const inSector = rings.filter(r => r.sector === k), a = inSector[3], b = inSector[4], side = k === 1 ? 1 : -1;
+    cells.push({ x: (a.x + b.x) / 2 + side * 1.7, y: (a.y + b.y) / 2 + .6, z: (a.z + b.z) / 2 + 3, taken: false, at: null });
+  }
+  return { ...base('flight', difficulty), seed, x: 0, y: 0, vx: 0, vy: 0, z: 0, shields: 3, passed: 0, combo: 0, longestCombo: 0, perfect: 0,
+    boost: 1, boosting: false, sector: 0, sectorAt: 0, medals: [], grade: null, hits: 0, impacts: 0, rings, rocks, cells,
     stars: Array.from({ length: 160 }, () => ({ x: (random() - .5) * 100, y: (random() - .5) * 65, z: random() * 300 })), flash: 0 };
 }
 export function evaluateRing(ring, x, y) {
   const error = Math.hypot(x - ring.x, y - ring.y) / ring.radius;
   return { hit: error <= 1, perfect: error <= .3, accuracy: clamp(1 - error, 0, 1) };
 }
+// The best score a run can make without boost, for the grade.
+export function flightPar(s) { let total = 0; for (let i = 0; i < s.rings.length; i++) total += 150 + Math.min(5, i) * 20; return total; }
+function medal(s, k) {
+  const rings = s.rings.filter(r => r.sector === k), hit = rings.filter(r => r.result && r.result !== 'miss').length, center = rings.filter(r => r.result === 'perfect').length;
+  return hit === rings.length && center >= rings.length * .6 ? 'gold' : hit === rings.length ? 'silver' : hit >= rings.length / 2 ? 'bronze' : 'none';
+}
+function closeSector(s, k) {
+  const m = medal(s, k), rings = s.rings.filter(r => r.sector === k);
+  s.medals[k] = m;
+  s.events.push({ type: 'sector', text: `${SECTORS[k].name} clear · ${m === 'none' ? 'no medal' : m} · ${rings.filter(r => r.result !== 'miss').length}/${rings.length} rings · ${rings.filter(r => r.result === 'perfect').length} dead center` });
+}
 export function stepFlight(s, input, dt) {
   if (s.phase !== 'playing') return;
-  const old = { x: s.x, y: s.y, z: s.z }, config = DIFFICULTIES[s.difficulty];
+  const old = { x: s.x, y: s.y, z: s.z, t: s.elapsed }, config = DIFFICULTIES[s.difficulty];
   s.elapsed += dt;
   const tx = input.target ? clamp((input.target.x - s.x) * 2.8, -5, 5) : (input.x || 0) * 5;
   const ty = input.target ? clamp((input.target.y - s.y) * 2.8, -5, 5) : (input.y || 0) * 5;
   const blend = 1 - Math.exp(-10 * dt);
   s.vx += (tx - s.vx) * blend; s.vy += (ty - s.vy) * blend;
   s.x = clamp(s.x + s.vx * dt, -5.8, 5.8); s.y = clamp(s.y + s.vy * dt, -3.6, 3.6);
-  s.z += (config.flightSpeed + Math.floor(s.passed / 6) * 1.2) * dt;
+  s.boosting = Boolean(input.boost) && s.boost > 0;
+  if (s.boosting) s.boost = Math.max(0, s.boost - BOOST.drain * dt);
+  s.z += (config.flightSpeed + s.sector * 1.2) * (s.boosting ? BOOST.speed : 1) * dt;
   s.flash = Math.max(0, s.flash - dt * 1.8);
+  const at = z => { const t = clamp((z - old.z) / Math.max(.000001, s.z - old.z), 0, 1); return { x: old.x + (s.x - old.x) * t, y: old.y + (s.y - old.y) * t, t: old.t + (s.elapsed - old.t) * t }; };
+  // Entering a sector.
+  const next = s.rings.find(r => !r.result);
+  if (next && next.sector > s.sector && s.z >= next.z - RING_GAP + 4) {
+    s.sector = next.sector; s.sectorAt = s.elapsed;
+    s.events.push({ type: 'sector-start', text: `Sector ${s.sector + 1} · ${SECTORS[s.sector].name}. ${SECTORS[s.sector].brief}` });
+  }
+  for (const rock of s.rocks) {
+    if (rock.hit || rock.z > s.z || rock.z <= old.z) continue;
+    const p = at(rock.z);
+    if (Math.hypot(p.x - rock.x, p.y - rock.y) <= rock.r + SHIP_RADIUS) {
+      rock.hit = true; s.impacts++; s.combo = 0; s.shields--; s.flash = 1;
+      s.events.push({ type: 'impact', text: `Hit a rock. ${s.shields} ${s.shields === 1 ? 'shield' : 'shields'} left.` });
+      if (s.shields <= 0) { s.phase = 'lost'; return; }
+    }
+  }
+  for (const cell of s.cells) {
+    if (cell.taken || cell.z > s.z || cell.z <= old.z) continue;
+    const p = at(cell.z);
+    if (Math.hypot(p.x - cell.x, p.y - cell.y) <= .95) {
+      cell.taken = true; cell.at = s.elapsed;
+      if (s.shields < 3) { s.shields++; s.events.push({ type: 'pickup', text: `Shield cell · ${s.shields} shields.` }); }
+      else { s.score += 250; s.events.push({ type: 'pickup', text: 'Shield cell · shields full, +250.' }); }
+    }
+  }
   for (const ring of s.rings) {
     if (ring.result || ring.z > s.z) continue;
-    // Judge at the crossing plane, not after a frame has advanced beyond it.
-    const t = clamp((ring.z - old.z) / Math.max(.000001, s.z - old.z), 0, 1);
-    const result = evaluateRing(ring, old.x + (s.x - old.x) * t, old.y + (s.y - old.y) * t);
-    ring.result = result.hit ? result.perfect ? 'perfect' : 'hit' : 'miss'; s.passed++;
+    // Judge at the crossing plane, at the moment of crossing, not after a frame has advanced beyond it.
+    const p = at(ring.z), place = ringAt(ring, p.t), result = evaluateRing({ ...ring, ...place }, p.x, p.y);
+    ring.result = result.hit ? result.perfect ? 'perfect' : 'hit' : 'miss'; ring.at = s.elapsed; s.passed++;
     if (result.hit) {
-      s.combo++; s.longestCombo = Math.max(s.combo, s.longestCombo);
+      s.combo++; s.hits++; s.longestCombo = Math.max(s.combo, s.longestCombo);
       if (result.perfect) s.perfect++;
-      const points = (result.perfect ? 150 : 100) + Math.min(5, s.combo - 1) * 20;
-      s.score += points; s.events.push({ type: ring.result, text: `${result.perfect ? 'Dead center' : 'Clean pass'} · +${points} · ${s.combo} in a row` });
+      s.boost = Math.min(1, s.boost + (result.perfect ? BOOST.perfect : BOOST.hit));
+      const points = Math.round(((result.perfect ? 150 : 100) + Math.min(5, s.combo - 1) * 20) * (s.boosting ? BOOST.points : 1));
+      s.score += points; s.events.push({ type: ring.result, text: `${result.perfect ? 'Dead center' : 'Clean pass'}${s.boosting ? ' on boost' : ''} · +${points} · ${s.combo} in a row` });
     } else { s.combo = 0; s.shields--; s.flash = 1; s.events.push({ type: 'miss', text: `Missed a ring. ${s.shields} ${s.shields === 1 ? 'shield' : 'shields'} left.` }); }
     if (s.shields <= 0) { s.phase = 'lost'; break; }
-    if (s.passed === s.rings.length) s.phase = 'won';
+    const following = s.rings[s.rings.indexOf(ring) + 1];
+    if (SECTORS[ring.sector] && (!following || following.sector !== ring.sector)) closeSector(s, ring.sector);
+    if (s.passed === s.rings.length) {
+      s.phase = 'won';
+      const share = s.score / flightPar(s);
+      s.grade = share >= .95 ? 'S' : share >= .8 ? 'A' : share >= .6 ? 'B' : 'C';
+    }
   }
 }
 export function mazeDistances(grid, from) {
@@ -156,13 +238,14 @@ export function validateRecords(raw) {
   const result = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return result;
   for (const [key, value] of Object.entries(raw).slice(0, 100)) {
-    if (!/^(flight|stack):(relaxed|standard)$|^maze:(relaxed|standard):\d{1,6}$/.test(key)) continue;
+    if (!/^(flight|flight-v2|stack):(relaxed|standard)$|^maze:(relaxed|standard):\d{1,6}$/.test(key)) continue;
     if (!Number.isFinite(value) || value < 0 || value > 1000000) continue;
     result[key] = value;
   }
   return result;
 }
-export function recordKey(s) { return `${s.mode}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
+// Ring Runner's three-sector course scores differently from the first course, so its bests start afresh.
+export function recordKey(s) { return `${s.mode === 'flight' ? 'flight-v2' : s.mode}:${s.difficulty}${s.mode === 'maze' ? ':' + s.seed : ''}`; }
 export function updateRecord(records, s) {
   if (!['won', 'lost'].includes(s.phase)) return false;
   const key = recordKey(s);

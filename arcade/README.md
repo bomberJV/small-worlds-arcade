@@ -27,14 +27,16 @@ The scene (`flight3d.js`) is a chase camera behind a faceted ship, with lit ring
 
 ### The Green Room
 
-A connected, generated maze with three crystals and one locked exit. There is no time limit. Collect all crystals, then enter the pink doorway.
+Three generated floors, each with three crystals and a locked door down. There is no time limit, but a warden walks the last floor.
 
-- Up/W moves forward; Down/S backs up. Left/A and Right/D turn. Drag horizontally to look around.
-- The minimap reveals explored corridors and records your trail. Reveal map can show the whole layout at any time.
-- New maze generates a different deterministic layout. Standard uses a 17×13 grid; Easygoing uses 13×13 and starts with the full map revealed.
-- Every generated target is reachable. Records store the fastest completed escape for the exact seed and pace, so times on different mazes are not compared.
-- Revealing the map is a navigation aid; records do not distinguish assisted and unassisted runs. There is no competitive leaderboard.
-- Wall rendering uses grid DDA ray casting. Sprite stripes are occluded against wall depth; crystals cannot show through walls.
+- **Floor 1, The Green Room**: lit by ceiling lamps. Learn how the halls work.
+- **Floor 2, The Dark**: no lamps. Your lantern reaches a few steps (farther on Easygoing), and the crystals light the halls around them. Some walls are knocked through, so there are loops.
+- **Floor 3, The Warden**: a hooded figure with a lamp wanders the halls. If it sees you, it follows the shortest way to you until it loses sight for a few seconds. A catch costs a spark and sends you back to the stairs; crystals you have found stay found. With no sparks left, the run is over.
+- Up/W moves forward; Down/S backs up. Left/A and Right/D turn. Hold Space or Shift (Run on a phone) to run. Running is half again as fast and drains your breath; empty it and you are winded until a third comes back.
+- The minimap fills in as you explore and records your trail. Reveal map shows the whole floor. On floor 3 the warden appears on the map only while it is in sight of you.
+- New maze generates a different set of three floors. Every floor's crystals, exit and the warden's start are reachable, and the warden starts at least six steps from you. Records store the fastest escape from all three floors for the exact seed and pace (`maze-v2`; times from the old single floor are kept but not compared).
+
+The scene (`room3d.js`) is real 3D in Canvas 2D: wall panels in each floor's material (boards and a rail, stone blocks, brick), floors and ceilings with joints and beams, and light from ceiling lamps, the crystals, the exit, your lantern and the warden's lamp. Fixed lights are worked out once per floor with line-of-sight, so light does not pass through walls. Only the halls in view are drawn. Before a run the camera circles above the floor; at the start of each floor it swoops down from above into your eyes, giving a glimpse of the layout; it bobs as you walk, widens as you run, shakes when you are caught, and rises out of the maze when you escape. With reduced motion there is no circling, swoop, bob or shake.
 
 ### Sky Stack
 
@@ -57,8 +59,9 @@ Scores, crystals, levels, status, controls and completion messages are exposed a
 ## Code
 
 - `engine.js`: pure game rules, seeded maze generation, collision geometry, scoring, record validation and DDA ray intersections.
-- `render.js`: the ray-cast maze and isometric tower, and the entry point for all three.
+- `render.js`: the isometric tower, and the entry point for all three.
 - `flight3d.js`: Ring Runner's scene and cameras.
+- `room3d.js`: The Green Room's scene, lights and cameras.
 - `app.js`: input, fixed-step loop, UI, pause handling, optional sound and local records.
 - `index.html`, `app.css`: cabinet UI and responsive layout.
 - `../shared/`: shared canvas sizing, base styling and storage utilities.

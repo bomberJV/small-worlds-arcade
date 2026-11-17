@@ -1,11 +1,11 @@
 import { canvasSize, safeLoad, safeSave } from '../shared/core.js';
-import { DIFFICULTIES, SECTORS, createFlight, createMaze, createStack, stepFlight, stepMaze, stepStack, dropStack, validateRecords, updateRecord, recordKey } from './engine.js';
+import { DIFFICULTIES, SECTORS, FLOORS, createFlight, createMaze, createStack, stepFlight, stepMaze, stepStack, dropStack, validateRecords, updateRecord, recordKey } from './engine.js';
 import { renderGame } from './render.js';
 
 const $ = selector => document.querySelector(selector), canvas = $('#game'), surface = canvasSize(canvas), reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const copy = {
   flight: { title: 'Ring Runner', eyebrow: 'CARTRIDGE 01 / THREE SECTORS', opening: 'Aim for the center', intro: 'Fly three sectors: low orbit, a debris field where the rings drift and rocks cross the lane, and a nebula where the rings breathe. Aim for the center to build a combo and earn each sector’s medal. Three shields; a missed ring or a rock costs one.', controls: 'Steer with arrows or WASD; hold Space to boost. On touch, drag the game view to aim and hold Boost. The radar points toward the next ring.', hint: 'ARROWS / WASD TO STEER · HOLD SPACE TO BOOST · ESC TO PAUSE', canvas: 'Ring Runner game view. Use arrows or WASD to steer and hold Space to boost, or drag on touch. Escape pauses the game.', rules: 'Each pass earns 100 points and a center pass 150. Consecutive passes add up to 100 more per ring. Boost flies faster and scores half as much again per ring; it drains while held, and dead-center passes refill it. A missed ring or a rock costs a shield, and three end the run. A shield cell waits off the line in the debris field and the nebula. Each sector awards gold (every ring, most of them dead center), silver (every ring) or bronze (half). The run ends with a grade from S to C. The course is fixed at each pace, so best scores are comparable. Easygoing has six wider rings per sector, slower flight, fewer rocks and gentler movement.' },
-  maze: { title: 'The Green Room', eyebrow: 'CARTRIDGE 02 / FIND THE EXIT', opening: 'There is a way out.', intro: 'Find all three crystals, then head for the pink exit. The map fills in as you go. Take your time, or try to beat your last run.', controls: 'Up / W goes forward; Down / S backs up. Left / A and Right / D turn. You can also drag the view to look around. Your map fills in as you explore.', hint: '↑ / W FORWARD · ← → / A D TURN · DRAG TO LOOK · ESC PAUSES', canvas: 'The Green Room maze. Use arrows or WASD to walk and turn; drag to look around. Escape pauses. Collect three crystals and find the exit.', rules: 'The exit opens only when all three crystals are collected. Each generated maze is connected, with reachable objectives. There is no time limit. Reveal map is always available if you get turned around. Best escape time is saved for this exact maze and pace. New maze resets the run and generates a different layout.' },
+  maze: { title: 'The Green Room', eyebrow: 'CARTRIDGE 02 / THREE FLOORS', opening: 'There is a way out.', intro: 'Three floors, three crystals on each, one door down. The first floor is lit. The second is dark: only your lantern and the crystals give light. On the third, something walks the halls with a lamp of its own; if it catches you, you lose a spark and start the floor again.', controls: 'Up / W goes forward; Down / S backs up. Left / A and Right / D turn. Hold Space or Shift (or Run on a phone) to run until you are winded. You can also drag the view to look around. Your map fills in as you explore.' },
   stack: { title: 'Sky Stack', eyebrow: 'CARTRIDGE 03 / STACK THE BLOCKS', opening: 'How high can you get?', intro: 'Drop the slab onto the tower. Anything hanging over the edge gets cut off, so the next one gets harder. A perfect drop keeps the whole footprint.', controls: 'Press Space, tap the tower, or use Drop block. The active lane alternates each level. Place the slab over the dotted footprint.', hint: 'SPACE / TAP THE TOWER TO DROP · ESC TO PAUSE', canvas: 'Sky Stack tower game. Press Space or tap the tower to drop a block. Escape pauses.', rules: 'Every successful level earns 100 points. A perfect drop earns 150 plus a streak bonus. Near-perfect drops snap into place. Every overhang is removed from the next slab. Miss the tower and the run ends. Complete 18 levels to build the skyline; Easygoing asks for 12 with slower movement.' },
 };
 const factories = { flight: createFlight, maze: createMaze, stack: createStack }, steppers = { flight: stepFlight, maze: stepMaze, stack: stepStack };
@@ -17,7 +17,7 @@ function status(text) { $('#game-status').textContent = text; }
 function clearInput() { keys.clear(); touchKeys.clear(); aim = null; lookPointer = null; document.querySelectorAll('[data-key]').forEach(b => b.classList.remove('pressed')); }
 function syncBest() {
   const value = records[recordKey(state)];
-  $('#best-label').textContent = mode === 'maze' ? `FASTEST ESCAPE / MAZE ${state.seed}` : 'PERSONAL BEST / THIS PACE';
+  $('#best-label').textContent = mode === 'maze' ? `FASTEST ESCAPE / MAZE ${state.seed} / ALL FLOORS` : 'PERSONAL BEST / THIS PACE';
   $('#best').textContent = Number.isFinite(value) ? mode === 'maze' ? `${timeLabel(value)}.${Math.round(value * 10) % 10}` : value.toLocaleString() : 'No record yet.';
 }
 function configure() {
@@ -25,8 +25,8 @@ function configure() {
   $('#game-rules').replaceChildren(); const p = document.createElement('p'); p.textContent = text.rules; $('#game-rules').append(p);
   $('#input-hint').textContent = text.hint; canvas.setAttribute('aria-label', text.canvas);
   $('#cartridge-label').textContent = `${text.title.toUpperCase()} / ${mode === 'maze' ? 'MAZE ' + seed : DIFFICULTIES[difficulty].label.toUpperCase()}`;
-  $('#renderer-label').textContent = { flight: 'PERSPECTIVE 3D / RING RUNNER', maze: 'RAY-CAST 3D / THE GREEN ROOM', stack: 'ISOMETRIC 3D / SKY STACK' }[mode];
-  $('#new-maze').hidden = mode !== 'maze'; $('#map-toggle').hidden = mode !== 'maze'; $('#action').hidden = mode !== 'stack'; $('#touch-controls').hidden = mode === 'stack'; $('.boost-key').hidden = mode !== 'flight';
+  $('#renderer-label').textContent = { flight: 'PERSPECTIVE 3D / RING RUNNER', maze: 'LIT 3D / THE GREEN ROOM', stack: 'ISOMETRIC 3D / SKY STACK' }[mode];
+  $('#new-maze').hidden = mode !== 'maze'; $('#map-toggle').hidden = mode !== 'maze'; $('#action').hidden = mode !== 'stack'; $('#touch-controls').hidden = mode === 'stack'; $('.boost-key').hidden = mode === 'stack'; $('.boost-key').textContent = mode === 'maze' ? 'Run' : 'Boost'; $('.boost-key').setAttribute('aria-label', mode === 'maze' ? 'Run, hold' : 'Boost, hold');
   document.querySelectorAll('[data-game]').forEach(b => b.setAttribute('aria-pressed', b.dataset.game === mode));
   $('#map-toggle').setAttribute('aria-pressed', Boolean(state.reveal)); $('#map-toggle').textContent = state.reveal ? 'Hide full map' : 'Reveal map';
   syncBest(); syncUi(); syncOverlay();
@@ -36,7 +36,7 @@ function reset(message = 'Ready when you are.') {
   $('#game-feedback').className = ''; status(message); configure(); requestFrame();
 }
 function start() {
-  reset(); state.phase = 'playing'; lastPhase = 'playing'; status(mode === 'maze' ? 'Find the three crystals, then the exit.' : mode === 'flight' ? 'The first two rings are straight ahead. Aim for the center.' : 'Watch the moving slab. Drop it over the footprint.');
+  reset(); state.phase = 'playing'; lastPhase = 'playing'; status(mode === 'maze' ? `Floor 1 · ${FLOORS[0].name}. Find the three crystals, then the door.` : mode === 'flight' ? 'The first two rings are straight ahead. Aim for the center.' : 'Watch the moving slab. Drop it over the footprint.');
   syncOverlay(); canvas.focus({ preventScroll: true }); $('#game-stage').scrollIntoView({ behavior: reduceMotion.matches ? 'instant' : 'smooth', block: 'center' }); requestFrame();
 }
 function pause(reason = 'Paused. Pick up where you left off.') {
@@ -53,23 +53,25 @@ function syncOverlay() {
   $('#start-game').textContent = phase === 'ready' ? 'Play' : ['won', 'lost'].includes(phase) ? 'Play again' : 'Restart'; $('#action').disabled = phase !== 'playing';
   if (phase === 'playing') return;
   $('#overlay-eyebrow').textContent = phase === 'ready' ? text.eyebrow : phase === 'paused' ? 'INTERMISSION' : phase === 'won' ? 'RUN COMPLETE' : 'ONE MORE TRY?';
-  $('#overlay-title').textContent = phase === 'ready' ? text.opening : phase === 'paused' ? 'Paused.' : phase === 'won' ? { flight: 'Nice. You made it.', maze: 'There’s the exit.', stack: 'Nice tower.' }[mode] : mode === 'flight' ? 'Lost the line.' : 'Missed it. One more try?';
-  $('#overlay-copy').textContent = phase === 'ready' ? mode === 'maze' ? 'Find three crystals to open the exit. Your map will fill in as you explore.' : mode === 'flight' ? `Three sectors, ${state.rings.length} rings, three shields. Hold Space to boost.` : `${DIFFICULTIES[difficulty].stackGoal} drops to the skyline. How steady is your timing?` : phase === 'paused' ? 'Your run is paused. Press Resume or Escape to keep going.' : mode === 'maze' ? `Escaped maze ${seed} in ${timeLabel(state.elapsed)}. Try it again or carve a new path.` : mode === 'flight' ? `${state.grade ? 'Grade ' + state.grade + ' · ' : ''}${state.score.toLocaleString()} points · ${state.perfect} center passes · best streak ${state.longestCombo}${state.medals.length ? ' · medals ' + state.medals.map(m => m === 'none' ? '–' : m).join(', ') : ''}` : `${state.drops} levels · ${state.perfect} perfect drops · ${state.score.toLocaleString()} points`;
+  $('#overlay-title').textContent = phase === 'ready' ? text.opening : phase === 'paused' ? 'Paused.' : phase === 'won' ? { flight: 'Nice. You made it.', maze: 'Out into the air.', stack: 'Nice tower.' }[mode] : mode === 'flight' ? 'Lost the line.' : mode === 'maze' ? 'The warden has you.' : 'Missed it. One more try?';
+  $('#overlay-copy').textContent = phase === 'ready' ? mode === 'maze' ? 'Three floors. Three crystals open each door down. Hold Space or Shift to run.' : mode === 'flight' ? `Three sectors, ${state.rings.length} rings, three shields. Hold Space to boost.` : `${DIFFICULTIES[difficulty].stackGoal} drops to the skyline. How steady is your timing?` : phase === 'paused' ? 'Your run is paused. Press Resume or Escape to keep going.' : mode === 'maze' ? (phase === 'won' ? `Escaped maze ${seed} in ${timeLabel(state.elapsed)} · floors at ${state.splits.map(timeLabel).join(', ')} · ${state.sparks} of 3 sparks left. Try it again or carve a new path.` : `Caught on floor 3 after ${timeLabel(state.elapsed)}, with ${state.crystals} of 9 crystals. Keep moving, and run when it sees you.`) : mode === 'flight' ? `${state.grade ? 'Grade ' + state.grade + ' · ' : ''}${state.score.toLocaleString()} points · ${state.perfect} center passes · best streak ${state.longestCombo}${state.medals.length ? ' · medals ' + state.medals.map(m => m === 'none' ? '–' : m).join(', ') : ''}` : `${state.drops} levels · ${state.perfect} perfect drops · ${state.score.toLocaleString()} points`;
   $('#overlay-prompt').textContent = phase === 'ready' ? 'PRESS PLAY BELOW TO BEGIN' : phase === 'paused' ? 'PRESS RESUME OR ESCAPE TO CONTINUE' : 'PRESS PLAY AGAIN FOR ANOTHER RUN';
 }
 function syncUi() {
-  const s = state, labels = mode === 'flight' ? ['Rings', 'Combo', 'Score'] : mode === 'maze' ? ['Crystals', 'Time', 'Explored'] : ['Levels', 'Perfect', 'Score'];
-  const values = mode === 'flight' ? [`${s.passed}/${s.rings.length}`, String(s.combo), s.score.toLocaleString()] : mode === 'maze' ? [`${s.collected}/3`, timeLabel(s.elapsed), String(s.visited.size)] : [`${s.drops}/${DIFFICULTIES[difficulty].stackGoal}`, String(s.perfect), String(s.score)];
+  const s = state, labels = mode === 'flight' ? ['Rings', 'Combo', 'Score'] : mode === 'maze' ? ['Crystals', 'Time', 'Floor'] : ['Levels', 'Perfect', 'Score'];
+  const values = mode === 'flight' ? [`${s.passed}/${s.rings.length}`, String(s.combo), s.score.toLocaleString()] : mode === 'maze' ? [`${s.crystals}/9`, timeLabel(s.elapsed), `${s.floor + 1}/${FLOORS.length}`] : [`${s.drops}/${DIFFICULTIES[difficulty].stackGoal}`, String(s.perfect), String(s.score)];
   ['one', 'two', 'three'].forEach((key, i) => { $('#stat-' + key + '-label').textContent = labels[i]; $('#stat-' + key).textContent = values[i]; });
-  $('#game-hud').textContent = mode === 'flight' ? `SHIELDS ${'●'.repeat(s.shields)}${'○'.repeat(3 - s.shields)}\nSECTOR ${s.sector + 1} · ${SECTORS[s.sector].name.toUpperCase()} · RING ${Math.min(s.passed + 1, s.rings.length)}/${s.rings.length}${s.medals.length ? '\n' + s.medals.map(m => m === 'none' ? '–' : m.toUpperCase()).join(' · ') : ''}` : mode === 'maze' ? `CRYSTALS ${s.collected}/3 · ${timeLabel(s.elapsed)}\n${s.collected === 3 ? 'EXIT OPEN' : 'FIND ALL THREE CRYSTALS'}` : `LEVEL ${s.drops}/${DIFFICULTIES[difficulty].stackGoal}\n${s.axis === 'x' ? '↘' : '↙'} NEXT LANE · ${s.combo ? s.combo + ' PERFECT STREAK' : 'FIND YOUR TIMING'}`;
+  $('#game-hud').textContent = mode === 'flight' ? `SHIELDS ${'●'.repeat(s.shields)}${'○'.repeat(3 - s.shields)}\nSECTOR ${s.sector + 1} · ${SECTORS[s.sector].name.toUpperCase()} · RING ${Math.min(s.passed + 1, s.rings.length)}/${s.rings.length}${s.medals.length ? '\n' + s.medals.map(m => m === 'none' ? '–' : m.toUpperCase()).join(' · ') : ''}` : mode === 'maze' ? `FLOOR ${s.floor + 1} OF ${FLOORS.length} · ${FLOORS[s.floor].name.toUpperCase()}\nCRYSTALS ${s.collected}/3 · ${timeLabel(s.elapsed)} · ${s.collected === 3 ? 'DOOR OPEN' : 'FIND ALL THREE'}` : `LEVEL ${s.drops}/${DIFFICULTIES[difficulty].stackGoal}\n${s.axis === 'x' ? '↘' : '↙'} NEXT LANE · ${s.combo ? s.combo + ' PERFECT STREAK' : 'FIND YOUR TIMING'}`;
 }
 function feedback(event, now) {
   status(event.text);
   // Ring Runner names a sector on the canvas as it begins; the status line carries it for screen readers.
   if (event.type === 'sector-start') { playSound('hit'); return; }
-  const element = $('#game-feedback'), bad = event.type === 'miss' || event.type === 'impact';
+  // The Green Room titles each floor on the canvas as it begins.
+  if (event.type === 'floor') { playSound('win'); return; }
+  const element = $('#game-feedback'), bad = ['miss', 'impact', 'caught', 'seen'].includes(event.type);
   element.textContent = event.text; element.className = `show${bad ? ' miss' : ''}`; feedbackUntil = now + (event.type === 'sector' ? 2400 : 1600);
-  playSound(bad ? 'miss' : event.type === 'perfect' || event.type === 'pickup' ? 'perfect' : event.type === 'sector' ? 'win' : 'hit');
+  playSound(bad ? 'miss' : event.type === 'perfect' || event.type === 'pickup' || event.type === 'gem' ? 'perfect' : event.type === 'sector' ? 'win' : 'hit');
 }
 function complete() {
   if (finished) return; finished = true; clearInput();
@@ -79,7 +81,7 @@ function complete() {
 }
 function input() {
   const pressed = key => keys.has(key) || [...touchKeys.values()].includes(key);
-  return { x: (pressed('ArrowRight') ? 1 : 0) - (pressed('ArrowLeft') ? 1 : 0), y: (pressed('ArrowUp') ? 1 : 0) - (pressed('ArrowDown') ? 1 : 0), target: aim, boost: pressed('Boost') };
+  return { x: (pressed('ArrowRight') ? 1 : 0) - (pressed('ArrowLeft') ? 1 : 0), y: (pressed('ArrowUp') ? 1 : 0) - (pressed('ArrowDown') ? 1 : 0), target: aim, boost: pressed('Boost'), sprint: pressed('Boost') || keys.has('Shift') };
 }
 function act() { if (mode !== 'stack') return; dropStack(state); requestFrame(); }
 function frame(now) {
@@ -95,9 +97,9 @@ function frame(now) {
   renderGame(surface.ctx, surface.w, surface.h, state, { now, reduced: reduceMotion.matches });
   if (now - lastUiTime > 100) { syncUi(); lastUiTime = now; }
   if (feedbackUntil && now > feedbackUntil) { $('#game-feedback').className = ''; feedbackUntil = 0; }
-  // Ring Runner keeps moving before a run (the camera circles the ship) and for a few seconds after it.
+  // Ring Runner and The Green Room keep moving before a run (the camera circles) and for a few seconds after it.
   if (['won', 'lost'].includes(state.phase) && !endedAt) endedAt = now;
-  const scene = mode === 'flight' && !reduceMotion.matches && (state.phase === 'ready' || (endedAt && now - endedAt < 3500));
+  const scene = mode !== 'stack' && !reduceMotion.matches && (state.phase === 'ready' || (endedAt && now - endedAt < 3500));
   if (state.phase === 'playing' || feedbackUntil || scene) requestFrame();
 }
 function requestFrame() { if (!frameId && visible && !document.hidden) frameId = requestAnimationFrame(frame); }
@@ -112,13 +114,15 @@ function gameKey(event, key) {
   if (event.target === canvas) return true;
   if (state.phase !== 'playing' || event.ctrlKey || event.metaKey || event.altKey) return false;
   if (key.startsWith('Arrow')) return !formField(event.target);
+  if (key === 'Shift') return !formField(event.target);
   return key === ' ' && !interactive(event.target);
 }
 document.addEventListener('keydown', event => {
   const key = mapKey(event.key);
   if (!gameKey(event, key)) return;
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Escape', 'p', 'P'].includes(key)) event.preventDefault();
-  if (key === ' ') { if (mode === 'flight') keys.add('Boost'); else if (!event.repeat) act(); }
+  if (key === ' ') { if (mode !== 'stack') keys.add('Boost'); else if (!event.repeat) act(); }
+  else if (key === 'Shift') keys.add('Shift');
   else if (key.startsWith('Arrow')) { aim = null; keys.add(key); }
 });
 document.addEventListener('keyup', event => { const key = mapKey(event.key); keys.delete(key); if (key === ' ') keys.delete('Boost'); });
